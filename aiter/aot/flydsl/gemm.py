@@ -13,6 +13,7 @@ way as runtime JIT config lookup.
 Supported kernel families:
   - ``flydsl_gemm2_*``           split-K HGEMM kernels
   - ``flydsl_bpreshuflle_*``     a8w8 preshuffle GEMM kernels
+  - ``flydsl_mxscale_*``         gfx1250 MXFP8 / A8W4 mxscale GEMM kernels
 
 Usage:
     # Compile all unique FlyDSL GEMM kernels from default CSVs
@@ -52,6 +53,11 @@ from aiter.ops.flydsl.gemm_kernels import (
 )
 from aiter.ops.flydsl.kernels.hgemm_dispatch import compile_flydsl_hgemm_kernel
 from aiter.ops.flydsl.kernels.preshuffle_gemm import compile_preshuffle_gemm_a8
+from aiter.ops.flydsl.mxscale_gemm import parse_flydsl_mxscale_kernel_name
+from aiter.ops.flydsl.mxscale_layout import (
+    SCALE_BLOCK as _MXSCALE_BLOCK,
+    get_padded_problem_shape as _mxscale_padded_shape,
+)
 
 # Keep the default AOT coverage aligned with runtime config resolution.
 DEFAULT_CSVS = [
@@ -151,6 +157,8 @@ def parse_csv(csv_path: str):
                 if params is not None:
                     params = dict(params)
                     params["kind"] = "hgemm"
+            elif kernel_name.startswith("flydsl_mxscale_"):
+                params = parse_flydsl_mxscale_kernel_name(kernel_name)
             else:
                 params = None
 
@@ -325,6 +333,93 @@ def _compile_preshuffle_to_cache(
     _compile_executable_to_cache(exe, out, a, b, scale_a, scale_b, bias, m, n, stream)
 
 
+def _compile_mxscale_to_cache(
+    *,
+    m: int,
+    n: int,
+    k: int,
+    data_format: str,
+    out_dtype: str,
+    tile_m: int,
+    tile_n: int,
+    tile_k: int,
+    m_warp: int,
+    n_warp: int,
+    num_buffers: int,
+    split_k: int,
+    use_tdm_store: bool,
+    use_scale_opsel: bool,
+    wave_specialized_tdm: bool,
+    l2_prefetch_distance: int,
+    cluster_m: int,
+    cluster_n: int,
+    waves_per_eu: int,
+    **kwargs,
+):
+    del kwargs
+
+    import torch
+
+    from aiter.ops.flydsl.kernels.gemm_fp8fp4_gfx1250 import compile_mxscale_gemm
+
+    has_cuda = torch.cuda.is_available() and torch.cuda.device_count() > 0
+    dev = torch.device("cuda") if has_cuda else torch.device("cpu")
+
+    out_dtype_torch = {"bf16": torch.bfloat16, "f16": torch.float16, "f32": torch.float32}[
+        out_dtype
+    ]
+
+    if split_k > 1 and use_tdm_store:
+        use_tdm_store = False
+
+    padded = _mxscale_padded_shape(
+        data_format, m, n, k, tile_m, tile_n, tile_k, split_k=split_k
+    )
+    pack_a, pack_b = padded["pack_a"], padded["pack_b"]
+    padded_m, padded_n, padded_k = padded["M"], padded["N"], padded["K"]
+    k_scale = padded["K_scale"]
+
+    a = torch.empty((padded_m, padded_k // pack_a), device=dev, dtype=torch.uint8)
+    b = torch.empty((padded_n, padded_k // pack_b), device=dev, dtype=torch.uint8)
+    a_scale = torch.empty((padded_m, k_scale), device=dev, dtype=torch.uint8)
+    b_scale = torch.empty((padded_n, k_scale), device=dev, dtype=torch.uint8)
+    out = torch.empty((padded_m, padded_n), device=dev, dtype=out_dtype_torch)
+    stream = fx.Stream(torch.cuda.current_stream(device=dev) if has_cuda else 0)
+
+    exe = compile_mxscale_gemm(
+        data_format=data_format,
+        M=padded_m,
+        N=padded_n,
+        K=padded_k,
+        tile_m=tile_m,
+        tile_n=tile_n,
+        tile_k=tile_k,
+        m_warp=m_warp,
+        n_warp=n_warp,
+        num_buffers=num_buffers,
+        waves_per_eu=waves_per_eu if waves_per_eu > 0 else None,
+        l2_prefetch_distance=l2_prefetch_distance,
+        cluster_m=cluster_m,
+        cluster_n=cluster_n,
+        use_tdm_store=use_tdm_store,
+        out_dtype=out_dtype,
+        wave_specialized_tdm=wave_specialized_tdm,
+        split_k=split_k,
+        use_scale_opsel=use_scale_opsel,
+    )
+    _compile_executable_to_cache(
+        exe,
+        out.contiguous().view(-1),
+        a.contiguous().view(-1),
+        b.contiguous().view(-1),
+        a_scale.contiguous().view(-1),
+        b_scale.contiguous().view(-1),
+        padded_m,
+        padded_n,
+        stream,
+    )
+
+
 def compile_one_config(
     kernel_name: str, kind: str, m: int, n: int, k: int, cu_num: int = 0, **kwargs
 ) -> dict:
@@ -352,6 +447,8 @@ def compile_one_config(
                 _compile_hgemm_to_cache(m=m, n=n, k=k, **hgemm_kwargs)
             elif kind == "preshuffle":
                 _compile_preshuffle_to_cache(m=m, n=n, k=k, **kwargs)
+            elif kind == "mxscale":
+                _compile_mxscale_to_cache(m=m, n=n, k=k, **kwargs)
             else:
                 raise ValueError(f"Unknown GEMM AOT kind: {kind}")
 
@@ -393,6 +490,7 @@ def main():
 
     hgemm_jobs = [j for j in all_jobs if j["kind"] == "hgemm"]
     preshuffle_jobs = [j for j in all_jobs if j["kind"] == "preshuffle"]
+    mxscale_jobs = [j for j in all_jobs if j["kind"] == "mxscale"]
 
     print("=" * 72)
     print("FlyDSL GEMM AOT Pre-compilation")
@@ -401,6 +499,7 @@ def main():
         print(f"  CSV:              {csv_path}")
     print(f"  HGEMM jobs:       {len(hgemm_jobs)}")
     print(f"  Preshuffle jobs:  {len(preshuffle_jobs)}")
+    print(f"  MXScale jobs:     {len(mxscale_jobs)}")
     print(f"  Total jobs:       {len(all_jobs)}")
     print("  Compile arch:     (from cu_num)")
     print(f"  Cache dir:        {cache_dir}")

@@ -115,6 +115,20 @@ else:
     from .ops.fused_split_gdr_update import *  # noqa: F403,E402
     from . import mla  # noqa: F403,F401,E402
 
+# Optional FlyDSL-backed entry points. Module loads even without flydsl;
+# the wrappers themselves raise a clear RuntimeError when invoked without it.
+# Public names are data-format-keyed (``gemm_mxfp8`` / ``gemm_mxa8w4``); the
+# backend-keyed name (``flydsl_mxscale_gemm``) remains exported as the
+# low-level entry for callers that need to pin the FlyDSL implementation.
+try:
+    from .ops.flydsl.mxscale_gemm import (  # noqa: F401,E402
+        flydsl_mxscale_gemm,
+        gemm_mxfp8,
+        gemm_mxa8w4,
+    )
+except ImportError:
+    pass
+
 # Import Triton-based communication primitives from ops.triton.comms (optional, only if Iris is available)
 try:
     from .ops.triton.comms import (
