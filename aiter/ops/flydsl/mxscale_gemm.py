@@ -32,6 +32,7 @@ from .mxscale_layout import (
     preshuffle_b_16x16,
     preshuffle_e8m0_scale_wmma,
     to_kernel_uint8,
+    validate_mxscale_num_buffers,
 )
 from .utils import is_flydsl_available
 
@@ -50,6 +51,29 @@ _TORCH_DTYPE_FROM_NAME = {
     "f32": torch.float32,
 }
 _NAME_FROM_TORCH_DTYPE = {v: k for k, v in _TORCH_DTYPE_FROM_NAME.items()}
+
+
+def _resolve_target_device(*tensors: Optional[Tensor]) -> torch.device:
+    cuda_devices = []
+    for tensor in tensors:
+        if tensor is None or not tensor.is_cuda:
+            continue
+        if tensor.device not in cuda_devices:
+            cuda_devices.append(tensor.device)
+    if len(cuda_devices) > 1:
+        devices = ", ".join(str(device) for device in cuda_devices)
+        raise ValueError(f"all MXScale tensors must use one CUDA device, got {devices}")
+    if cuda_devices:
+        return cuda_devices[0]
+    if not torch.cuda.is_available():
+        raise RuntimeError("flydsl_mxscale_gemm requires an available CUDA device")
+    return torch.device("cuda", torch.cuda.current_device())
+
+
+def _to_target_device(tensor: Tensor, device: torch.device) -> Tensor:
+    if tensor.device == device:
+        return tensor
+    return tensor.to(device=device, non_blocking=True)
 
 
 def _lazy_import_flydsl():
@@ -317,9 +341,17 @@ def flydsl_mxscale_gemm(
             f"B_scale shape must be {(N, K // SCALE_BLOCK)}, got {tuple(B_scale.shape)}"
         )
 
+    validate_mxscale_num_buffers(K, tile_k, num_buffers, split_k=split_k)
+    target_device = _resolve_target_device(A, B, A_scale, B_scale, out)
+
     if out is not None and tuple(out.shape) != (M, N):
         raise ValueError(
             f"out shape must be {(M, N)}, got {tuple(out.shape)}"
+        )
+    if out is not None and out.device != target_device:
+        raise ValueError(
+            f"out must be on the MXScale launch device {target_device}, "
+            f"got {out.device}"
         )
 
     # ----- Pad + preshuffle -----
@@ -335,10 +367,10 @@ def flydsl_mxscale_gemm(
     a_s_p = preshuffle_e8m0_scale_wmma(a_s_p, warp_tile_m, scale_k_per_tile=skt)
     b_s_p = preshuffle_e8m0_scale_wmma(b_s_p, warp_tile_n, scale_k_per_tile=skt)
 
-    a_dev = a_p.cuda() if not a_p.is_cuda else a_p
-    b_dev = b_p.cuda() if not b_p.is_cuda else b_p
-    a_s_dev = a_s_p.cuda() if not a_s_p.is_cuda else a_s_p
-    b_s_dev = b_s_p.cuda() if not b_s_p.is_cuda else b_s_p
+    a_dev = _to_target_device(a_p, target_device)
+    b_dev = _to_target_device(b_p, target_device)
+    a_s_dev = _to_target_device(a_s_p, target_device)
+    b_s_dev = _to_target_device(b_s_p, target_device)
 
     # ----- Allocate padded out + (optional) zero-init for split-K -----
     out_buf = torch.empty(

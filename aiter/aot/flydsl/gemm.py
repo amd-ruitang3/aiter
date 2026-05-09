@@ -55,8 +55,8 @@ from aiter.ops.flydsl.kernels.hgemm_dispatch import compile_flydsl_hgemm_kernel
 from aiter.ops.flydsl.kernels.preshuffle_gemm import compile_preshuffle_gemm_a8
 from aiter.ops.flydsl.mxscale_gemm import parse_flydsl_mxscale_kernel_name
 from aiter.ops.flydsl.mxscale_layout import (
-    SCALE_BLOCK as _MXSCALE_BLOCK,
     get_padded_problem_shape as _mxscale_padded_shape,
+    validate_mxscale_num_buffers as _validate_mxscale_num_buffers,
 )
 
 # Keep the default AOT coverage aligned with runtime config resolution.
@@ -372,6 +372,7 @@ def _compile_mxscale_to_cache(
     if split_k > 1 and use_tdm_store:
         use_tdm_store = False
 
+    _validate_mxscale_num_buffers(k, tile_k, num_buffers, split_k=split_k)
     padded = _mxscale_padded_shape(
         data_format, m, n, k, tile_m, tile_n, tile_k, split_k=split_k
     )
@@ -519,6 +520,12 @@ def main():
         print(f"\n--- Preshuffle GEMM ({len(preshuffle_jobs)} kernels) ---")
         for i, job in enumerate(preshuffle_jobs, 1):
             print(f"\n[{i}/{len(preshuffle_jobs)}] ", end="")
+            results.append(compile_one_config(**job))
+
+    if mxscale_jobs:
+        print(f"\n--- MXScale GEMM ({len(mxscale_jobs)} kernels) ---")
+        for i, job in enumerate(mxscale_jobs, 1):
+            print(f"\n[{i}/{len(mxscale_jobs)}] ", end="")
             results.append(compile_one_config(**job))
 
     total_elapsed = time.time() - total_t0

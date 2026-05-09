@@ -16,7 +16,7 @@ Kept separate from ``aiter.utility.fp4_utils`` because:
 
 from __future__ import annotations
 
-from typing import Tuple
+from typing import Optional, Tuple
 
 import torch
 from torch import Tensor
@@ -30,6 +30,7 @@ SCALES_PER_WMMA: int = 4
 # The kernel pads scale rows with E8M0(127) which decodes to 2^0 = 1.0
 # so padded contributions accumulate to zero (data is padded with 0).
 E8M0_ONE: int = 127
+SUPPORTED_NUM_BUFFERS: Tuple[int, ...] = (2, 3, 4)
 
 
 def mxscale_pack_factors(data_format: str) -> Tuple[int, int]:
@@ -50,6 +51,58 @@ def mxscale_pack_factors(data_format: str) -> Tuple[int, int]:
 
 def _align_up(value: int, alignment: int) -> int:
     return ((value + alignment - 1) // alignment) * alignment
+
+
+def mxscale_k_tiles_per_split(K: int, tile_k: int, split_k: int = 1) -> Tuple[int, int]:
+    """Return (num_k_tiles_per_split, padded_k) for the host padding rule."""
+    if tile_k <= 0:
+        raise ValueError(f"tile_k must be positive, got {tile_k}")
+    if split_k < 1:
+        raise ValueError(f"split_k must be >= 1, got {split_k}")
+    padded_k = _align_up(K, tile_k * split_k)
+    return padded_k // (tile_k * split_k), padded_k
+
+
+def recommended_num_buffers(K: int, tile_k: int, split_k: int = 1) -> Optional[int]:
+    """Return the largest supported num_buffers value that fits this K shape."""
+    num_k_tiles, _ = mxscale_k_tiles_per_split(K, tile_k, split_k)
+    choices = [value for value in SUPPORTED_NUM_BUFFERS if value <= num_k_tiles]
+    return max(choices) if choices else None
+
+
+def validate_mxscale_num_buffers(
+    K: int,
+    tile_k: int,
+    num_buffers: int,
+    split_k: int = 1,
+) -> None:
+    """Reject K shapes that cannot satisfy the requested pipeline depth."""
+    if num_buffers not in SUPPORTED_NUM_BUFFERS:
+        raise ValueError(
+            f"num_buffers must be one of {SUPPORTED_NUM_BUFFERS}, got {num_buffers}"
+        )
+
+    num_k_tiles, padded_k = mxscale_k_tiles_per_split(K, tile_k, split_k)
+    if num_k_tiles >= num_buffers:
+        return
+
+    min_padded_k = tile_k * split_k * num_buffers
+    suggestion = recommended_num_buffers(K, tile_k, split_k)
+    if suggestion is None:
+        recommendation = (
+            "No supported num_buffers value fits this shape; increase K so "
+            f"padded K >= {min_padded_k} or reduce split_k."
+        )
+    else:
+        recommendation = (
+            f"Recommended num_buffers={suggestion} for this shape, or increase "
+            f"K so padded K >= {min_padded_k}."
+        )
+    raise ValueError(
+        f"num_buffers={num_buffers} requires at least {num_buffers} K tiles per "
+        f"split, but K={K} pads to {padded_k}, giving {num_k_tiles}. "
+        f"{recommendation}"
+    )
 
 
 def get_padded_problem_shape(
@@ -84,6 +137,13 @@ def get_padded_problem_shape(
 def _pad_2d(t: Tensor, rows: int, cols: int, fill_value: int) -> Tensor:
     if t.shape == (rows, cols):
         return t
+    fp4_dtype = getattr(torch, "float4_e2m1fn_x2", None)
+    if fp4_dtype is not None and t.dtype == fp4_dtype:
+        padded_u8 = torch.full(
+            (rows, cols), fill_value, dtype=torch.uint8, device=t.device
+        )
+        padded_u8[: t.shape[0], : t.shape[1]] = t.contiguous().view(torch.uint8)
+        return padded_u8.view(fp4_dtype)
     padded = torch.full(
         (rows, cols), fill_value, dtype=t.dtype, device=t.device
     )
@@ -146,7 +206,18 @@ def preshuffle_e8m0_scale_wmma(
     FlyDSL/tests/kernels/test_gemm_fp8fp4_gfx1250.py:preshuffle_e8m0_scale.
     """
     _, k_scale = scale.shape
-    assert k_scale % 4 == 0, f"K_scale must be divisible by 4, got {k_scale}"
+    if scale_k_per_tile <= 0:
+        raise ValueError(f"scale_k_per_tile must be positive, got {scale_k_per_tile}")
+    if scale_k_per_tile % SCALES_PER_WMMA != 0:
+        raise ValueError(
+            f"scale_k_per_tile must be divisible by {SCALES_PER_WMMA}, "
+            f"got {scale_k_per_tile}"
+        )
+    if k_scale % scale_k_per_tile != 0:
+        raise ValueError(
+            f"K_scale={k_scale} must be divisible by scale_k_per_tile="
+            f"{scale_k_per_tile}"
+        )
     wmma_rep = warp_tile // wmma_dim
     k_groups = k_scale // scale_k_per_tile
     k_wmma_steps = scale_k_per_tile // SCALES_PER_WMMA
