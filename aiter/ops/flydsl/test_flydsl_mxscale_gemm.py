@@ -12,6 +12,8 @@ Usage:
 
 from __future__ import annotations
 
+import os
+
 import pytest
 import torch
 
@@ -19,9 +21,7 @@ from aiter.ops.flydsl.utils import is_flydsl_available
 from aiter.utility.fp4_utils import e8m0_to_f32, mxfp4_to_f32
 
 if not torch.cuda.is_available():
-    pytest.skip(
-        "ROCm not available. Skipping GPU tests.", allow_module_level=True
-    )
+    pytest.skip("ROCm not available. Skipping GPU tests.", allow_module_level=True)
 if not is_flydsl_available():
     pytest.skip(
         "flydsl is not installed. Skipping FlyDSL mxscale tests.",
@@ -31,9 +31,7 @@ if not is_flydsl_available():
 try:
     from flydsl.runtime.device import get_rocm_arch
 except ImportError as exc:
-    pytest.skip(
-        f"Unable to import flydsl runtime: {exc}", allow_module_level=True
-    )
+    pytest.skip(f"Unable to import flydsl runtime: {exc}", allow_module_level=True)
 
 if str(get_rocm_arch()) != "gfx1250":
     pytest.skip(
@@ -54,7 +52,19 @@ from aiter.ops.flydsl.mxscale_layout import (  # noqa: E402
     pad_mxscale_inputs,
     preshuffle_b_16x16,
     preshuffle_e8m0_scale_wmma,
+    recommended_num_buffers,
 )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _release_flydsl_mxscale_cache():
+    yield
+    torch.cuda.synchronize()
+    from aiter.ops.flydsl.kernels.gemm_fp8fp4_gfx1250 import (  # noqa: PLC0415
+        compile_mxscale_gemm,
+    )
+
+    compile_mxscale_gemm.cache_clear()
 
 
 # ---------------------------------------------------------------------------
@@ -141,18 +151,47 @@ def _gen_inputs_for_dtype(M, N, K, *, out_dtype, is_a8w4):
 @pytest.mark.parametrize(
     "fmt,M,N,K,tile_m,tile_n,tile_k,split_k,want",
     [
-        ("fp8", 128, 256, 256, 128, 128, 128, 1,
-         {"M": 128, "N": 256, "K": 256, "K_scale": 8, "pack_a": 1, "pack_b": 1}),
-        ("a8w4", 13, 17, 256, 128, 128, 128, 2,
-         {"M": 128, "N": 128, "K": 256, "K_scale": 8, "pack_a": 1, "pack_b": 2}),
-        ("fp8", 1, 1, 64, 128, 128, 128, 1,
-         {"M": 128, "N": 128, "K": 128, "K_scale": 4, "pack_a": 1, "pack_b": 1}),
+        (
+            "fp8",
+            128,
+            256,
+            256,
+            128,
+            128,
+            128,
+            1,
+            {"M": 128, "N": 256, "K": 256, "K_scale": 8, "pack_a": 1, "pack_b": 1},
+        ),
+        (
+            "a8w4",
+            13,
+            17,
+            256,
+            128,
+            128,
+            128,
+            2,
+            {"M": 128, "N": 128, "K": 256, "K_scale": 8, "pack_a": 1, "pack_b": 2},
+        ),
+        (
+            "fp8",
+            1,
+            1,
+            64,
+            128,
+            128,
+            128,
+            1,
+            {"M": 128, "N": 128, "K": 128, "K_scale": 4, "pack_a": 1, "pack_b": 1},
+        ),
     ],
 )
 def test_padded_problem_shape(fmt, M, N, K, tile_m, tile_n, tile_k, split_k, want):
     if K % SCALE_BLOCK != 0:
         pytest.skip("test config has K not divisible by SCALE_BLOCK")
-    got = get_padded_problem_shape(fmt, M, N, K, tile_m, tile_n, tile_k, split_k=split_k)
+    got = get_padded_problem_shape(
+        fmt, M, N, K, tile_m, tile_n, tile_k, split_k=split_k
+    )
     assert got == want
 
 
@@ -204,11 +243,20 @@ def test_kernel_name_round_trip_fp8():
     cfg = dict(
         data_format="fp8",
         out_dtype="bf16",
-        tile_m=128, tile_n=128, tile_k=128,
-        m_warp=2, n_warp=2, num_buffers=2,
+        tile_m=128,
+        tile_n=128,
+        tile_k=128,
+        m_warp=2,
+        n_warp=2,
+        num_buffers=2,
         split_k=1,
-        use_tdm_store=True, use_scale_opsel=False, wave_specialized_tdm=False,
-        l2_prefetch_distance=2, cluster_m=1, cluster_n=1, waves_per_eu=0,
+        use_tdm_store=True,
+        use_scale_opsel=False,
+        wave_specialized_tdm=False,
+        l2_prefetch_distance=2,
+        cluster_m=1,
+        cluster_n=1,
+        waves_per_eu=0,
     )
     name = flydsl_mxscale_kernel_name(**cfg)
     assert name == (
@@ -225,11 +273,20 @@ def test_kernel_name_round_trip_a8w4():
     cfg = dict(
         data_format="a8w4",
         out_dtype="f32",
-        tile_m=128, tile_n=128, tile_k=256,
-        m_warp=2, n_warp=2, num_buffers=2,
+        tile_m=128,
+        tile_n=128,
+        tile_k=256,
+        m_warp=2,
+        n_warp=2,
+        num_buffers=2,
         split_k=2,
-        use_tdm_store=False, use_scale_opsel=True, wave_specialized_tdm=False,
-        l2_prefetch_distance=4, cluster_m=2, cluster_n=2, waves_per_eu=2,
+        use_tdm_store=False,
+        use_scale_opsel=True,
+        wave_specialized_tdm=False,
+        l2_prefetch_distance=4,
+        cluster_m=2,
+        cluster_n=2,
+        waves_per_eu=2,
     )
     name = flydsl_mxscale_kernel_name(**cfg)
     parsed = parse_flydsl_mxscale_kernel_name(name)
@@ -239,8 +296,18 @@ def test_kernel_name_round_trip_a8w4():
 
 
 def test_kernel_name_parser_rejects_other_families():
-    assert parse_flydsl_mxscale_kernel_name("flydsl_gemm2_abf16_wbf16_bf16_t32x64x128_split_k1_block_m_warp1_block_n_warp1_async_copyTrue_b_to_ldsTrue_b_preshuffleFalse_c_to_ldsFalse_gfx950") is None
-    assert parse_flydsl_mxscale_kernel_name("flydsl_bpreshuflle_128x128x128_F8_F8_B16_2x0x0x0_v3") is None
+    assert (
+        parse_flydsl_mxscale_kernel_name(
+            "flydsl_gemm2_abf16_wbf16_bf16_t32x64x128_split_k1_block_m_warp1_block_n_warp1_async_copyTrue_b_to_ldsTrue_b_preshuffleFalse_c_to_ldsFalse_gfx950"
+        )
+        is None
+    )
+    assert (
+        parse_flydsl_mxscale_kernel_name(
+            "flydsl_bpreshuflle_128x128x128_F8_F8_B16_2x0x0x0_v3"
+        )
+        is None
+    )
     assert parse_flydsl_mxscale_kernel_name("not_a_kernel") is None
 
 
@@ -279,6 +346,63 @@ _SHAPES = [
     (13, 17, 256),  # exercise pad path
 ]
 _OUT_DTYPES = ["bf16", "f16", "f32"]
+_RUN_DEEPSEEK_SHAPES = os.getenv("AITER_FLYDSL_MXSCALE_RUN_DEEPSEEK_SHAPES", "0") == "1"
+_DEEPSEEK_REFERENCE_MAX_M = 64
+
+_DEEPSEEK_FP8_SHAPES = [
+    # M, N, K, tile_m, tile_n, tile_k, m_warp, n_warp, table_num_buffers
+    (1, 256, 7168, 16, 256, 256, 1, 4, 4),
+    (1, 512, 7168, 16, 256, 256, 1, 4, 4),
+    (1, 2112, 7168, 16, 256, 256, 1, 4, 4),
+    (1, 3072, 1536, 16, 256, 256, 1, 4, 4),
+    (1, 4096, 512, 16, 256, 256, 1, 4, 4),
+    (1, 7168, 2048, 16, 256, 256, 1, 4, 4),
+    (64, 256, 7168, 16, 256, 256, 1, 4, 4),
+    (64, 512, 7168, 16, 256, 256, 1, 4, 4),
+    (64, 2112, 7168, 16, 256, 256, 1, 4, 4),
+    (64, 3072, 1536, 16, 256, 256, 1, 4, 4),
+    (64, 4096, 512, 16, 256, 256, 1, 4, 4),
+    (64, 7168, 2048, 16, 256, 256, 1, 4, 4),
+    (1024, 256, 7168, 256, 256, 128, 2, 2, 4),
+    (1024, 512, 7168, 256, 256, 128, 2, 2, 4),
+    (1024, 2112, 7168, 256, 256, 128, 2, 2, 4),
+    (1024, 3072, 1536, 256, 256, 128, 2, 2, 4),
+    (1024, 4096, 512, 256, 256, 128, 2, 2, 4),
+    (1024, 7168, 2048, 256, 256, 128, 2, 2, 4),
+    (65536, 256, 7168, 256, 256, 128, 2, 2, 4),
+    (65536, 512, 7168, 256, 256, 128, 2, 2, 4),
+    (65536, 2112, 7168, 256, 256, 128, 2, 2, 4),
+    (65536, 3072, 1536, 256, 256, 128, 2, 2, 4),
+    (65536, 4096, 512, 256, 256, 128, 2, 2, 4),
+    (65536, 7168, 2048, 256, 256, 128, 2, 2, 4),
+]
+
+
+def _deepseek_shape_id(case):
+    M, N, K, tile_m, tile_n, tile_k, m_warp, n_warp, _ = case
+    return f"M{M}_N{N}_K{K}_t{tile_m}x{tile_n}x{tile_k}_" f"w{m_warp}x{n_warp}"
+
+
+def _deepseek_shape_params():
+    params = []
+    for case in _DEEPSEEK_FP8_SHAPES:
+        marks = []
+        if not _RUN_DEEPSEEK_SHAPES:
+            marks.append(
+                pytest.mark.skip(
+                    "DeepSeek MXScale shape; set "
+                    "AITER_FLYDSL_MXSCALE_RUN_DEEPSEEK_SHAPES=1 to run"
+                )
+            )
+        params.append(pytest.param(case, id=_deepseek_shape_id(case), marks=marks))
+    return params
+
+
+def _effective_num_buffers(K: int, tile_k: int, table_num_buffers: int) -> int:
+    suggestion = recommended_num_buffers(K, tile_k)
+    if suggestion is None:
+        raise ValueError(f"no supported num_buffers for K={K}, tile_k={tile_k}")
+    return min(table_num_buffers, suggestion)
 
 
 @pytest.mark.parametrize("M,N,K", _SHAPES)
@@ -293,8 +417,12 @@ def test_mxfp8_gemm_correctness(M, N, K, out_dtype, use_tdm_store):
     ref = _ref_mxscale_gemm(a, b, a_s, b_s, M, N, K, is_a8w4=False)
 
     out = flydsl_mxscale_gemm(
-        a.cuda(), b.cuda(), a_s.cuda(), b_s.cuda(),
-        data_format="fp8", out_dtype=out_dtype,
+        a.cuda(),
+        b.cuda(),
+        a_s.cuda(),
+        b_s.cuda(),
+        data_format="fp8",
+        out_dtype=out_dtype,
         use_tdm_store=use_tdm_store,
     )
     out_f = out.float().cpu()
@@ -305,6 +433,62 @@ def test_mxfp8_gemm_correctness(M, N, K, out_dtype, use_tdm_store):
     else:
         atol = max(1e-2, K * 0.6)
         torch.testing.assert_close(out_f, ref_f, rtol=1e-3, atol=atol)
+
+
+@pytest.mark.parametrize("case", _deepseek_shape_params())
+def test_mxfp8_deepseek_shapes(case):
+    (
+        M,
+        N,
+        K,
+        tile_m,
+        tile_n,
+        tile_k,
+        m_warp,
+        n_warp,
+        table_num_buffers,
+    ) = case
+    torch.manual_seed(11)
+    a = _random_fp8_bytes(M, K, max_byte=0x40)
+    b = _random_fp8_bytes(N, K, max_byte=0x40)
+    a_s = _random_e8m0(M, K // SCALE_BLOCK, low=127, high=128)
+    b_s = _random_e8m0(N, K // SCALE_BLOCK, low=127, high=128)
+    num_buffers = _effective_num_buffers(K, tile_k, table_num_buffers)
+
+    try:
+        a_dev = a.cuda()
+        b_dev = b.cuda()
+        a_s_dev = a_s.cuda()
+        b_s_dev = b_s.cuda()
+        out = flydsl_mxscale_gemm(
+            a_dev,
+            b_dev,
+            a_s_dev,
+            b_s_dev,
+            data_format="fp8",
+            out_dtype="bf16",
+            tile_m=tile_m,
+            tile_n=tile_n,
+            tile_k=tile_k,
+            m_warp=m_warp,
+            n_warp=n_warp,
+            num_buffers=num_buffers,
+            cluster_m=1,
+            cluster_n=1,
+            wave_specialized_tdm=True,
+        )
+        assert out.shape == (M, N)
+        assert out.dtype == torch.bfloat16
+        if M <= _DEEPSEEK_REFERENCE_MAX_M:
+            ref = _ref_mxscale_gemm(
+                a_dev, b_dev, a_s_dev, b_s_dev, M, N, K, is_a8w4=False
+            )
+            torch.testing.assert_close(
+                out.float().cpu(), ref.float().cpu(), rtol=2e-2, atol=5e-2
+            )
+        torch.cuda.synchronize()
+    finally:
+        torch.cuda.empty_cache()
 
 
 @pytest.mark.parametrize("M,N,K", _SHAPES)
@@ -318,8 +502,12 @@ def test_a8w4_gemm_correctness(M, N, K, out_dtype):
     ref = _ref_mxscale_gemm(a, b, a_s, b_s, M, N, K, is_a8w4=True)
 
     out = flydsl_mxscale_gemm(
-        a.cuda(), b.cuda(), a_s.cuda(), b_s.cuda(),
-        data_format="a8w4", out_dtype=out_dtype,
+        a.cuda(),
+        b.cuda(),
+        a_s.cuda(),
+        b_s.cuda(),
+        data_format="a8w4",
+        out_dtype=out_dtype,
         # A8W4 is sensitive to scale range; use coarse but adequate tile.
     )
     out_f = out.float().cpu()
@@ -345,8 +533,13 @@ def test_split_k_runs():
     b_s = _random_e8m0(N, K // SCALE_BLOCK)
     ref = _ref_mxscale_gemm(a, b, a_s, b_s, M, N, K, is_a8w4=False)
     out = flydsl_mxscale_gemm(
-        a.cuda(), b.cuda(), a_s.cuda(), b_s.cuda(),
-        data_format="fp8", out_dtype="bf16", split_k=2,
+        a.cuda(),
+        b.cuda(),
+        a_s.cuda(),
+        b_s.cuda(),
+        data_format="fp8",
+        out_dtype="bf16",
+        split_k=2,
     )
     torch.testing.assert_close(out.float().cpu(), ref.float(), rtol=2e-2, atol=5e-2)
 
@@ -360,11 +553,18 @@ def test_format_named_wrappers_match_low_level():
     # MXFP8 path
     a, b, a_s, b_s = _gen_inputs_for_dtype(M, N, K, out_dtype="bf16", is_a8w4=False)
     ll = flydsl_mxscale_gemm(
-        a.cuda(), b.cuda(), a_s.cuda(), b_s.cuda(),
-        data_format="fp8", out_dtype="bf16",
+        a.cuda(),
+        b.cuda(),
+        a_s.cuda(),
+        b_s.cuda(),
+        data_format="fp8",
+        out_dtype="bf16",
     )
     hl = gemm_mxfp8(
-        a.cuda(), b.cuda(), a_s.cuda(), b_s.cuda(),
+        a.cuda(),
+        b.cuda(),
+        a_s.cuda(),
+        b_s.cuda(),
         out_dtype="bf16",
     )
     torch.testing.assert_close(hl.float().cpu(), ll.float().cpu(), rtol=0, atol=0)
@@ -372,11 +572,18 @@ def test_format_named_wrappers_match_low_level():
     # MXA8W4 path
     a, b, a_s, b_s = _gen_inputs_for_dtype(M, N, K, out_dtype="bf16", is_a8w4=True)
     ll = flydsl_mxscale_gemm(
-        a.cuda(), b.cuda(), a_s.cuda(), b_s.cuda(),
-        data_format="a8w4", out_dtype="bf16",
+        a.cuda(),
+        b.cuda(),
+        a_s.cuda(),
+        b_s.cuda(),
+        data_format="a8w4",
+        out_dtype="bf16",
     )
     hl = gemm_mxa8w4(
-        a.cuda(), b.cuda(), a_s.cuda(), b_s.cuda(),
+        a.cuda(),
+        b.cuda(),
+        a_s.cuda(),
+        b_s.cuda(),
         out_dtype="bf16",
     )
     torch.testing.assert_close(hl.float().cpu(), ll.float().cpu(), rtol=0, atol=0)
@@ -391,8 +598,12 @@ def test_user_provided_out_buffer():
     b_s = _random_e8m0(N, K // SCALE_BLOCK)
     out = torch.empty((M, N), dtype=torch.bfloat16, device="cuda")
     returned = flydsl_mxscale_gemm(
-        a.cuda(), b.cuda(), a_s.cuda(), b_s.cuda(),
-        data_format="fp8", out=out,
+        a.cuda(),
+        b.cuda(),
+        a_s.cuda(),
+        b_s.cuda(),
+        data_format="fp8",
+        out=out,
     )
     assert returned.data_ptr() == out.data_ptr()
     assert returned.shape == (M, N)
@@ -407,7 +618,11 @@ def test_irregular_shape_no_overflow():
     a_s = _random_e8m0(M, K // SCALE_BLOCK)
     b_s = _random_e8m0(N, K // SCALE_BLOCK)
     out = flydsl_mxscale_gemm(
-        a.cuda(), b.cuda(), a_s.cuda(), b_s.cuda(),
-        data_format="fp8", out_dtype="bf16",
+        a.cuda(),
+        b.cuda(),
+        a_s.cuda(),
+        b_s.cuda(),
+        data_format="fp8",
+        out_dtype="bf16",
     )
     assert out.shape == (M, N)

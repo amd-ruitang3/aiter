@@ -365,9 +365,11 @@ def _compile_mxscale_to_cache(
     has_cuda = torch.cuda.is_available() and torch.cuda.device_count() > 0
     dev = torch.device("cuda") if has_cuda else torch.device("cpu")
 
-    out_dtype_torch = {"bf16": torch.bfloat16, "f16": torch.float16, "f32": torch.float32}[
-        out_dtype
-    ]
+    out_dtype_torch = {
+        "bf16": torch.bfloat16,
+        "f16": torch.float16,
+        "f32": torch.float32,
+    }[out_dtype]
 
     if split_k > 1 and use_tdm_store:
         use_tdm_store = False

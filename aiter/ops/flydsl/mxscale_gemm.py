@@ -142,9 +142,13 @@ def flydsl_mxscale_kernel_name(
 ) -> str:
     """Encode a fully-qualified kernel name for the gfx1250 MXScale kernel."""
     if data_format not in _VALID_FORMATS:
-        raise ValueError(f"data_format must be one of {_VALID_FORMATS}, got {data_format!r}")
+        raise ValueError(
+            f"data_format must be one of {_VALID_FORMATS}, got {data_format!r}"
+        )
     if out_dtype not in _VALID_OUT_DTYPES:
-        raise ValueError(f"out_dtype must be one of {_VALID_OUT_DTYPES}, got {out_dtype!r}")
+        raise ValueError(
+            f"out_dtype must be one of {_VALID_OUT_DTYPES}, got {out_dtype!r}"
+        )
     return (
         f"flydsl_mxscale_{data_format}_{out_dtype}_"
         f"t{tile_m}x{tile_n}x{tile_k}_mw{m_warp}_nw{n_warp}_buf{num_buffers}_"
@@ -329,9 +333,7 @@ def flydsl_mxscale_gemm(
         )
     K = A.shape[1] * pack_a
     if K % SCALE_BLOCK != 0:
-        raise ValueError(
-            f"K={K} must be divisible by SCALE_BLOCK={SCALE_BLOCK}"
-        )
+        raise ValueError(f"K={K} must be divisible by SCALE_BLOCK={SCALE_BLOCK}")
     if A_scale.shape != (M, K // SCALE_BLOCK):
         raise ValueError(
             f"A_scale shape must be {(M, K // SCALE_BLOCK)}, got {tuple(A_scale.shape)}"
@@ -345,9 +347,7 @@ def flydsl_mxscale_gemm(
     target_device = _resolve_target_device(A, B, A_scale, B_scale, out)
 
     if out is not None and tuple(out.shape) != (M, N):
-        raise ValueError(
-            f"out shape must be {(M, N)}, got {tuple(out.shape)}"
-        )
+        raise ValueError(f"out shape must be {(M, N)}, got {tuple(out.shape)}")
     if out is not None and out.device != target_device:
         raise ValueError(
             f"out must be on the MXScale launch device {target_device}, "
@@ -453,7 +453,9 @@ def gemm_mxfp8(
 ) -> Tensor:
     """Public entry for OCP MX FP8 dense GEMM (E4M3 + E8M0 1x32 scale)."""
     if "data_format" in kwargs:
-        raise TypeError("gemm_mxfp8 does not accept data_format; format is fixed to 'fp8'")
+        raise TypeError(
+            "gemm_mxfp8 does not accept data_format; format is fixed to 'fp8'"
+        )
     return flydsl_mxscale_gemm(A, B, A_scale, B_scale, data_format="fp8", **kwargs)
 
 
@@ -466,7 +468,9 @@ def gemm_mxa8w4(
 ) -> Tensor:
     """Public entry for OCP MX A8W4 dense GEMM (FP8 act, FP4 weight, E8M0 1x32 scale)."""
     if "data_format" in kwargs:
-        raise TypeError("gemm_mxa8w4 does not accept data_format; format is fixed to 'a8w4'")
+        raise TypeError(
+            "gemm_mxa8w4 does not accept data_format; format is fixed to 'a8w4'"
+        )
     return flydsl_mxscale_gemm(A, B, A_scale, B_scale, data_format="a8w4", **kwargs)
 
 

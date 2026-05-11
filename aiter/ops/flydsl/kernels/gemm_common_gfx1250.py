@@ -1,4 +1,4 @@
-"""Shared utilities for gfx1250 GEMM kernels (fp16 / mxfp4 / mxfp8). """
+"""Shared utilities for gfx1250 GEMM kernels (fp16 / mxfp4 / mxfp8)."""
 
 from flydsl._mlir import ir
 from flydsl._mlir.dialects import llvm as llvm_dialect, scf
@@ -6,7 +6,9 @@ from flydsl.expr import arith, buffer_ops, gpu, rocdl, tdm_ops, vector
 from flydsl.expr.arith import _to_raw as _raw
 from flydsl.expr.typing import T
 from flydsl.utils.smem_allocator import (
-    SmemPtr, get_mlir_type_size, get_op_result_or_value,
+    SmemPtr,
+    get_mlir_type_size,
+    get_op_result_or_value,
 )
 
 
@@ -38,7 +40,9 @@ def lds_load_b128(memref, elem_off):
     """
     vec_ty = _lds_vec_type(memref, 128)
     loaded = vector.load_op(vec_ty, memref, [elem_off])
-    return vector.bitcast(ir.VectorType.get([4], ir.IntegerType.get_signless(32)), loaded)
+    return vector.bitcast(
+        ir.VectorType.get([4], ir.IntegerType.get_signless(32)), loaded
+    )
 
 
 def lds_store_b128(memref, elem_off, data):
@@ -86,7 +90,9 @@ def lds_load_b128_raw(lds_base_idx, byte_offset):
         byte_offset: Byte offset (index-type) relative to the base.
     """
     ptr_val = _raw_lds_ptr(lds_base_idx, byte_offset)
-    return llvm_dialect.load(ir.VectorType.get([4], ir.IntegerType.get_signless(32)), ptr_val)
+    return llvm_dialect.load(
+        ir.VectorType.get([4], ir.IntegerType.get_signless(32)), ptr_val
+    )
 
 
 def lds_transpose_load_raw(result_type, lds_base_idx, byte_offset):
@@ -171,8 +177,7 @@ def issue_tdm_loads(*descs, wave_specialized=False, wave_id=None):
         tdm_ops.tensor_load_2d(desc)
 
 
-def store_acc_vec8_to_lds(memref, base_elem_off, imm_elem_off, acc_vec8,
-                          out_elem=None):
+def store_acc_vec8_to_lds(memref, base_elem_off, imm_elem_off, acc_vec8, out_elem=None):
     """Write one 8-element f32 accumulator sub-vector to LDS.
 
     For half output (out_elem = T.f16 or T.bf16):
@@ -194,16 +199,19 @@ def store_acc_vec8_to_lds(memref, base_elem_off, imm_elem_off, acc_vec8,
         lds_store_b128(memref, off, i32_vec)
     else:
         for half in range(2):
-            vals = [vector.extract(acc_vec8,
-                                   static_position=[half * 4 + vi],
-                                   dynamic_position=[])
-                    for vi in range(4)]
+            vals = [
+                vector.extract(
+                    acc_vec8, static_position=[half * 4 + vi], dynamic_position=[]
+                )
+                for vi in range(4)
+            ]
             vec4 = vector.from_elements(T.vec(4, T.f32), vals)
             lds_store_b128(memref, off + arith.index(half * 8), vec4)
 
 
-def store_acc_vec8_to_buffer(acc_vec8, c_rsrc, addr,
-                             out_elem=None, offset_is_bytes=False):
+def store_acc_vec8_to_buffer(
+    acc_vec8, c_rsrc, addr, out_elem=None, offset_is_bytes=False
+):
     """Write one 8-element f32 accumulator sub-vector to global memory.
 
     For half output (out_elem = T.f16 or T.bf16):
@@ -224,15 +232,16 @@ def store_acc_vec8_to_buffer(acc_vec8, c_rsrc, addr,
     if out_elem is not None:
         h_vec = arith.trunc_f(T.vec(8, out_elem), acc_vec8)
         i32_vec = vector.bitcast(T.vec(4, T.i32), h_vec)
-        buffer_ops.buffer_store(i32_vec, c_rsrc, addr,
-                                offset_is_bytes=offset_is_bytes)
+        buffer_ops.buffer_store(i32_vec, c_rsrc, addr, offset_is_bytes=offset_is_bytes)
         return 1
     else:
         for half in range(2):
-            vals = [vector.extract(acc_vec8,
-                                   static_position=[half * 4 + vi],
-                                   dynamic_position=[])
-                    for vi in range(4)]
+            vals = [
+                vector.extract(
+                    acc_vec8, static_position=[half * 4 + vi], dynamic_position=[]
+                )
+                for vi in range(4)
+            ]
             vec4 = vector.from_elements(T.vec(4, T.f32), vals)
             if isinstance(addr, (list, tuple)):
                 buffer_ops.buffer_store(vec4, c_rsrc, addr[half])

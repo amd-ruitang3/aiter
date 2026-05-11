@@ -144,9 +144,7 @@ def _pad_2d(t: Tensor, rows: int, cols: int, fill_value: int) -> Tensor:
         )
         padded_u8[: t.shape[0], : t.shape[1]] = t.contiguous().view(torch.uint8)
         return padded_u8.view(fp4_dtype)
-    padded = torch.full(
-        (rows, cols), fill_value, dtype=t.dtype, device=t.device
-    )
+    padded = torch.full((rows, cols), fill_value, dtype=t.dtype, device=t.device)
     padded[: t.shape[0], : t.shape[1]] = t
     return padded
 
