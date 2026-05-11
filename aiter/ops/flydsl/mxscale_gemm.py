@@ -23,7 +23,7 @@ import torch
 from torch import Tensor
 
 from aiter import logger
-from aiter.jit.utils.chip_info import get_gfx
+from aiter.jit.utils.chip_info import get_gfx_runtime
 
 from .mxscale_layout import (
     SCALE_BLOCK,
@@ -273,7 +273,7 @@ def flydsl_mxscale_gemm(
         raise ValueError(
             f"data_format must be one of {_VALID_FORMATS}, got {data_format!r}"
         )
-    cur_gfx = get_gfx()
+    cur_gfx = get_gfx_runtime()
     if cur_gfx != _TARGET_GFX:
         raise RuntimeError(
             f"flydsl_mxscale_gemm requires {_TARGET_GFX}, current arch is {cur_gfx!r}"

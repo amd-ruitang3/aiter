@@ -126,7 +126,7 @@ try:
         gemm_mxfp8,
         gemm_mxa8w4,
     )
-except ImportError:
+except (ImportError, RuntimeError, OSError, KeyError):
     pass
 
 # Import Triton-based communication primitives from ops.triton.comms (optional, only if Iris is available)

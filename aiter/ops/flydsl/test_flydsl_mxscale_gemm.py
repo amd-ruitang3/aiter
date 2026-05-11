@@ -334,6 +334,20 @@ def test_format_named_wrappers_reject_data_format_kwarg():
         gemm_mxa8w4(a, b, s, s, data_format="a8w4")
 
 
+def test_runtime_arch_gate_ignores_gpu_archs(monkeypatch):
+    from aiter.jit.utils import chip_info
+
+    monkeypatch.setenv("GPU_ARCHS", "gfx950")
+    chip_info.get_gfx.cache_clear()
+    chip_info.get_gfx_custom_op_core.cache_clear()
+
+    a = torch.zeros((32,), dtype=torch.uint8)
+    b = torch.zeros((32,), dtype=torch.uint8)
+    s = torch.zeros((1, 1), dtype=torch.uint8)
+    with pytest.raises(ValueError, match="A and B must be 2-D"):
+        flydsl_mxscale_gemm(a, b, s, s, data_format="fp8")
+
+
 # ---------------------------------------------------------------------------
 # GPU correctness tests (gfx1250 + flydsl required, gated above)
 # ---------------------------------------------------------------------------
