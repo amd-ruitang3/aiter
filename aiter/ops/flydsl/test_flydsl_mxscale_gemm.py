@@ -640,3 +640,233 @@ def test_irregular_shape_no_overflow():
         out_dtype="bf16",
     )
     assert out.shape == (M, N)
+
+
+# ---------------------------------------------------------------------------
+# Single-config performance benchmark (CLI driver, not collected by pytest)
+# ---------------------------------------------------------------------------
+#
+# Eager mode  : ``triton.testing.do_bench`` (with L2 flush between reps).
+# Graph mode  : ``triton.testing.do_bench_cudagraph`` — captures one launch
+#               and replays ``rep`` times in a single capture session, which
+#               strips the per-launch ``hipModuleLaunchKernel`` overhead.
+#
+# Usage:
+#   python -m aiter.ops.flydsl.test_flydsl_mxscale_gemm \
+#       --bench --M 1 --N 128256 --K 8192 \
+#       --tile-m 16 --tile-n 256 --tile-k 256 \
+#       --m-warp 1 --n-warp 4 --num-buffers 3 --split-k 1 \
+#       --data-format fp8 --out-dtype bf16 [--use-graph]
+
+_OUT_TORCH_DTYPE = {
+    "bf16": torch.bfloat16,
+    "f16": torch.float16,
+    "f32": torch.float32,
+}
+
+
+def _bench_mxscale_us(
+    *,
+    M: int,
+    N: int,
+    K: int,
+    data_format: str = "fp8",
+    out_dtype: str = "bf16",
+    tile_m: int = 16,
+    tile_n: int = 256,
+    tile_k: int = 256,
+    m_warp: int = 1,
+    n_warp: int = 4,
+    num_buffers: int = 3,
+    split_k: int = 1,
+    cluster_m: int = 1,
+    cluster_n: int = 1,
+    wave_specialized_tdm: bool = True,
+    l2_prefetch_distance: int = 2,
+    use_tdm_store: bool = True,
+    use_graph: bool = False,
+    warmup: int = 10,
+    iters: int = 100,
+) -> float:
+    """Time one ``flydsl_mxscale_gemm`` config; return median latency in microseconds.
+
+    Generates random fp8/fp4 + e8m0 inputs sized for ``data_format``, then drives
+    the kernel through the production aiter wrapper. The first warmup call also
+    JIT-compiles the kernel and primes the ``_cf`` fast-path cache.
+    """
+    import triton  # local import: aiter benches always have triton available
+
+    is_a8w4 = data_format == "a8w4"
+    a = _random_fp8_bytes(M, K, max_byte=0x40)
+    if is_a8w4:
+        b = _random_fp4_packed(N, K // 2)
+    else:
+        b = _random_fp8_bytes(N, K, max_byte=0x40)
+    a_s = _random_e8m0(M, K // SCALE_BLOCK, low=127, high=128)
+    b_s = _random_e8m0(N, K // SCALE_BLOCK, low=127, high=128)
+
+    a_d = a.cuda()
+    b_d = b.cuda()
+    as_d = a_s.cuda()
+    bs_d = b_s.cuda()
+    out = torch.empty((M, N), dtype=_OUT_TORCH_DTYPE[out_dtype], device="cuda")
+
+    # ``flydsl_mxscale_gemm`` will silently flip ``use_tdm_store`` to False when
+    # ``split_k > 1`` (kernel constraint) — we mirror that here so the kernel
+    # name in any tuned dispatch table stays consistent.
+    eff_use_tdm_store = use_tdm_store and (split_k == 1)
+
+    def fn():
+        flydsl_mxscale_gemm(
+            a_d,
+            b_d,
+            as_d,
+            bs_d,
+            data_format=data_format,
+            out=out,
+            tile_m=tile_m,
+            tile_n=tile_n,
+            tile_k=tile_k,
+            m_warp=m_warp,
+            n_warp=n_warp,
+            num_buffers=num_buffers,
+            split_k=split_k,
+            cluster_m=cluster_m,
+            cluster_n=cluster_n,
+            wave_specialized_tdm=wave_specialized_tdm,
+            l2_prefetch_distance=l2_prefetch_distance,
+            use_tdm_store=eff_use_tdm_store,
+        )
+
+    # Warmup: JIT-compile + bind the CompiledFunction on the launcher.
+    for _ in range(warmup):
+        fn()
+    torch.cuda.synchronize()
+
+    if use_graph:
+        # do_bench_cudagraph captures one launch and replays ``rep`` times.
+        ms = triton.testing.do_bench_cudagraph(fn, rep=iters)
+    else:
+        # do_bench keeps an L2-flush + outlier-trimmed median; matches the
+        # eager numbers in flydsl_fp8_perf/final_table.md.
+        ms = triton.testing.do_bench(fn, warmup=warmup, rep=iters)
+    return ms * 1e3  # ms → us
+
+
+def _print_bench_result(args, latency_us: float) -> None:
+    M, N, K = args.M, args.N, args.K
+    is_a8w4 = args.data_format == "a8w4"
+    flops = 2.0 * M * N * K
+    out_bytes_per_el = {"bf16": 2, "f16": 2, "f32": 4}[args.out_dtype]
+    a_bytes = M * K  # fp8 byte storage
+    b_bytes = N * (K // 2 if is_a8w4 else K)  # fp4 packs 2 nibbles / byte
+    scale_bytes = (M * K + N * K) // SCALE_BLOCK  # E8M0, 1 byte per scale
+    c_bytes = M * N * out_bytes_per_el
+    total_bytes = a_bytes + b_bytes + scale_bytes + c_bytes
+    bw_gbs = total_bytes / (latency_us * 1e-6) / 1e9
+    tflops = flops / (latency_us * 1e-6) / 1e12
+
+    label = "graph" if args.use_graph else "eager"
+    print(
+        f"[bench/{label}] M={M} N={N} K={K} fmt={args.data_format} out={args.out_dtype}"
+    )
+    print(
+        f"  tile=({args.tile_m},{args.tile_n},{args.tile_k}) "
+        f"warp=({args.m_warp},{args.n_warp}) nb={args.num_buffers} "
+        f"sk={args.split_k} cluster=({args.cluster_m},{args.cluster_n}) "
+        f"wst={args.wave_specialized_tdm} l2pf={args.l2_prefetch_distance} "
+        f"tdms={args.use_tdm_store and args.split_k == 1}"
+    )
+    print(f"  latency = {latency_us:.3f} us")
+    print(f"  TFLOPS  = {tflops:.2f}")
+    print(f"  BW      = {bw_gbs:.2f} GB/s")
+
+
+def _bench_main():
+    import argparse
+
+    p = argparse.ArgumentParser(
+        description=(
+            "FlyDSL gfx1250 MXScale GEMM single-config bench, routed through "
+            "aiter.ops.flydsl.flydsl_mxscale_gemm (fast launch path is automatic)."
+        )
+    )
+    p.add_argument(
+        "--bench",
+        action="store_true",
+        help="Run the benchmark (without it the parser just prints help).",
+    )
+    p.add_argument("--M", type=int, required=True)
+    p.add_argument("--N", type=int, required=True)
+    p.add_argument("--K", type=int, required=True)
+    p.add_argument("--data-format", choices=["fp8", "a8w4"], default="fp8")
+    p.add_argument("--out-dtype", choices=["bf16", "f16", "f32"], default="bf16")
+    p.add_argument("--tile-m", type=int, default=16)
+    p.add_argument("--tile-n", type=int, default=256)
+    p.add_argument("--tile-k", type=int, default=256)
+    p.add_argument("--m-warp", type=int, default=1)
+    p.add_argument("--n-warp", type=int, default=4)
+    p.add_argument("--num-buffers", type=int, default=3)
+    p.add_argument("--split-k", type=int, default=1)
+    p.add_argument("--cluster-m", type=int, default=1)
+    p.add_argument("--cluster-n", type=int, default=1)
+    p.add_argument(
+        "--no-wave-spec-tdm",
+        dest="wave_specialized_tdm",
+        action="store_false",
+        default=True,
+        help="Disable wave-specialized TDM (default: enabled).",
+    )
+    p.add_argument(
+        "--no-tdm-store",
+        dest="use_tdm_store",
+        action="store_false",
+        default=True,
+        help="Disable TDM store (auto-disabled when split_k > 1).",
+    )
+    p.add_argument("--l2-prefetch-distance", type=int, default=2)
+    p.add_argument(
+        "--use-graph",
+        action="store_true",
+        default=False,
+        help=(
+            "Time via hipGraph (triton.do_bench_cudagraph). Strips host launch "
+            "overhead — useful for small shapes whose latency floor is "
+            "fixed-cost dominated."
+        ),
+    )
+    p.add_argument("--warmup", type=int, default=10)
+    p.add_argument("--iters", type=int, default=100)
+    args = p.parse_args()
+
+    if not args.bench:
+        p.print_help()
+        return
+
+    latency_us = _bench_mxscale_us(
+        M=args.M,
+        N=args.N,
+        K=args.K,
+        data_format=args.data_format,
+        out_dtype=args.out_dtype,
+        tile_m=args.tile_m,
+        tile_n=args.tile_n,
+        tile_k=args.tile_k,
+        m_warp=args.m_warp,
+        n_warp=args.n_warp,
+        num_buffers=args.num_buffers,
+        split_k=args.split_k,
+        cluster_m=args.cluster_m,
+        cluster_n=args.cluster_n,
+        wave_specialized_tdm=args.wave_specialized_tdm,
+        l2_prefetch_distance=args.l2_prefetch_distance,
+        use_tdm_store=args.use_tdm_store,
+        use_graph=args.use_graph,
+        warmup=args.warmup,
+        iters=args.iters,
+    )
+    _print_bench_result(args, latency_us)
+
+
+if __name__ == "__main__":
+    _bench_main()
