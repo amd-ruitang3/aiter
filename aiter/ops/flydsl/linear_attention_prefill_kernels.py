@@ -380,6 +380,18 @@ def _heuristic_bv(*, H: int, V: int, T_flat: int, N: int, is_varlen: bool) -> in
     return _DEFAULT_BV
 
 
+def _k5_exp2_prescaled_enabled() -> bool:
+    """Read FLYDSL_K5_EXP2_PRESCALED env var at every call (no caching).
+
+    When set to a truthy value (1/true/yes/on), the K5 kernel is compiled
+    with ``G_IS_LOG2_SCALED=True`` and ``_fast_exp`` drops the per-call
+    ``* log2(e)`` multiply. This is a PERF-ONLY probe: outputs are
+    incorrect unless K12 has been updated to pre-scale ``g_cumsum``.
+    """
+    val = os.environ.get("FLYDSL_K5_EXP2_PRESCALED", "")
+    return val.strip().lower() in ("1", "true", "yes", "on")
+
+
 def _get_or_compile(
     K,
     V,
@@ -396,6 +408,7 @@ def _get_or_compile(
     wu_contig,
     state_bf16=False,
 ):
+    g_log2_scaled = _k5_exp2_prescaled_enabled()
     cache_key = (
         K,
         V,
@@ -411,6 +424,7 @@ def _get_or_compile(
         is_varlen,
         wu_contig,
         state_bf16,
+        g_log2_scaled,
     )
     if cache_key not in _compiled_kernels:
         _compiled_kernels[cache_key] = compile_chunk_gated_delta_h(
@@ -428,6 +442,7 @@ def _get_or_compile(
             IS_VARLEN=is_varlen,
             WU_CONTIGUOUS=wu_contig,
             STATE_DTYPE_BF16=state_bf16,
+            G_IS_LOG2_SCALED=g_log2_scaled,
         )
     return _compiled_kernels[cache_key]
 

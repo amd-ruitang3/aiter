@@ -34,9 +34,31 @@ def _llvm_lds_ptr_ty():
     return ir.Type.parse("!llvm.ptr<3>")
 
 
-def _fast_exp(x):
-    """exp(x) via exp2(x * log2(e)), maps to single v_exp_f32 on AMD."""
-    return rocdl.exp2(T.f32, x * _LOG2E)
+def _make_fast_exp(g_is_log2_scaled: bool):
+    """Return the ``exp`` helper for this kernel compile.
+
+    If ``g_is_log2_scaled`` is False (default), ``g_cumsum`` is in the natural
+    log domain (matches upstream K12) and we lower ``exp(x)`` as
+    ``exp2(x * log2(e))`` so the multiplier merges into one ``v_exp_f32`` plus
+    one ``v_mul_f32`` on AMD.
+
+    If True, the caller has pre-scaled ``g_cumsum`` by ``log2(e)`` already
+    (the K12 prescale optimization), so we can drop the per-call ``* LOG2E``
+    multiply and lower directly to a single ``v_exp_f32``. NOTE: enabling
+    this flag without the matching K12 prescale produces incorrect outputs;
+    it exists for ISA-level perf probing of the prescale upper bound.
+    """
+    if g_is_log2_scaled:
+
+        def _fast_exp(x):
+            return rocdl.exp2(T.f32, x)
+
+    else:
+
+        def _fast_exp(x):
+            return rocdl.exp2(T.f32, x * _LOG2E)
+
+    return _fast_exp
 
 
 def _mfma_bf16_16x16x32(a_bf16x8, b_bf16x8, acc_f32x4):
@@ -65,6 +87,7 @@ def compile_chunk_gated_delta_h(
     IS_VARLEN: bool = True,
     WU_CONTIGUOUS: bool = True,
     STATE_DTYPE_BF16: bool = False,
+    G_IS_LOG2_SCALED: bool = False,
 ):
     """Compile the GDN K5 kernel.
 
@@ -85,6 +108,8 @@ def compile_chunk_gated_delta_h(
     assert K % 64 == 0
     assert BV % 16 == 0
     NUM_K_BLOCKS = K // 64
+
+    _fast_exp = _make_fast_exp(G_IS_LOG2_SCALED)
 
     WARP_SIZE = 64
     NUM_WARPS = 4
