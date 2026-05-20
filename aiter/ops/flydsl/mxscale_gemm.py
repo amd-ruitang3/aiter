@@ -44,6 +44,7 @@ _fx = None  # type: ignore[assignment]
 _TARGET_GFX = "gfx1250"
 _VALID_FORMATS = ("fp8", "a8w4")
 _VALID_OUT_DTYPES = ("bf16", "f16", "f32")
+_VALID_SCALE_LOAD_PATHS = ("tdm", "buffer_lds_stage", "buffer_lds_stage_ab_split")
 
 _TORCH_DTYPE_FROM_NAME = {
     "bf16": torch.bfloat16,
@@ -102,7 +103,8 @@ def _lazy_import_flydsl():
 
 # Format:
 #   flydsl_mxscale_{fmt}_{out}_t{tm}x{tn}x{tk}_mw{mw}_nw{nw}_buf{buf}
-#     _sk{sk}_tdms{0|1}_opsel{0|1}_wst{0|1}_l2pf{d}_cm{cm}_cn{cn}_wpe{wpe}_gfx1250
+#     _sk{sk}_tdms{0|1}_opsel{0|1}_wst{0|1}_l2pf{d}_cm{cm}_cn{cn}_wpe{wpe}
+#     [_bs{0|1}_slp{scale_load_path}]_gfx1250
 _KERNEL_NAME_RE = re.compile(
     r"^flydsl_mxscale_"
     r"(?P<fmt>fp8|a8w4)_"
@@ -115,7 +117,9 @@ _KERNEL_NAME_RE = re.compile(
     r"wst(?P<wave_specialized_tdm>[01])_"
     r"l2pf(?P<l2_prefetch_distance>\d+)_"
     r"cm(?P<cluster_m>\d+)_cn(?P<cluster_n>\d+)_"
-    r"wpe(?P<waves_per_eu>\d+)_"
+    r"wpe(?P<waves_per_eu>\d+)"
+    r"(?:_bs(?P<b_streaming>[01])_slp"
+    r"(?P<scale_load_path>tdm|buffer_lds_stage|buffer_lds_stage_ab_split))?_"
     r"(?P<target_gfx>gfx1250)$"
 )
 
@@ -138,6 +142,8 @@ def flydsl_mxscale_kernel_name(
     cluster_m: int,
     cluster_n: int,
     waves_per_eu: int,
+    b_streaming: bool = False,
+    scale_load_path: str = "tdm",
     target_gfx: str = _TARGET_GFX,
 ) -> str:
     """Encode a fully-qualified kernel name for the gfx1250 MXScale kernel."""
@@ -149,13 +155,21 @@ def flydsl_mxscale_kernel_name(
         raise ValueError(
             f"out_dtype must be one of {_VALID_OUT_DTYPES}, got {out_dtype!r}"
         )
+    if scale_load_path not in _VALID_SCALE_LOAD_PATHS:
+        raise ValueError(
+            f"scale_load_path must be one of {_VALID_SCALE_LOAD_PATHS}, "
+            f"got {scale_load_path!r}"
+        )
+    streaming_suffix = ""
+    if b_streaming or scale_load_path != "tdm":
+        streaming_suffix = f"_bs{int(bool(b_streaming))}_slp{scale_load_path}"
     return (
         f"flydsl_mxscale_{data_format}_{out_dtype}_"
         f"t{tile_m}x{tile_n}x{tile_k}_mw{m_warp}_nw{n_warp}_buf{num_buffers}_"
         f"sk{split_k}_tdms{int(bool(use_tdm_store))}_"
         f"opsel{int(bool(use_scale_opsel))}_wst{int(bool(wave_specialized_tdm))}_"
         f"l2pf{l2_prefetch_distance}_cm{cluster_m}_cn{cluster_n}_"
-        f"wpe{waves_per_eu}_{target_gfx}"
+        f"wpe{waves_per_eu}{streaming_suffix}_{target_gfx}"
     )
 
 
@@ -186,6 +200,12 @@ def parse_flydsl_mxscale_kernel_name(name: str) -> Optional[Dict]:
         "cluster_m": int(m.group("cluster_m")),
         "cluster_n": int(m.group("cluster_n")),
         "waves_per_eu": int(m.group("waves_per_eu")),
+        "b_streaming": (
+            m.group("b_streaming") == "1"
+            if m.group("b_streaming") is not None
+            else False
+        ),
+        "scale_load_path": m.group("scale_load_path") or "tdm",
         "target_gfx": m.group("target_gfx"),
     }
 
@@ -246,6 +266,8 @@ def flydsl_mxscale_gemm(
     inst_prefetch: bool = False,
     expert_sched_mode: bool = True,
     atomic_barrier_enable: bool = False,
+    b_streaming: bool = False,
+    scale_load_path: str = "tdm",
     kernel_name: Optional[str] = None,
 ) -> Tensor:
     """Run a FlyDSL gfx1250 MXScale GEMM (data_format ∈ {"fp8", "a8w4"}).
@@ -311,9 +333,16 @@ def flydsl_mxscale_gemm(
         cluster_m = parsed["cluster_m"]
         cluster_n = parsed["cluster_n"]
         waves_per_eu = parsed["waves_per_eu"]
+        b_streaming = parsed["b_streaming"]
+        scale_load_path = parsed["scale_load_path"]
         out_dtype = parsed["out_dtype"]
 
     out_dtype_name, out_torch_dtype = _resolve_out_dtype(out, out_dtype)
+    if scale_load_path not in _VALID_SCALE_LOAD_PATHS:
+        raise ValueError(
+            f"scale_load_path must be one of {_VALID_SCALE_LOAD_PATHS}, "
+            f"got {scale_load_path!r}"
+        )
 
     # split_k > 1 requires plain buffer-store (atomic adds) and a zero-init out.
     if split_k > 1 and use_tdm_store:
@@ -405,6 +434,8 @@ def flydsl_mxscale_gemm(
         use_scale_opsel=use_scale_opsel,
         expert_sched_mode=expert_sched_mode,
         atomic_barrier_enable=atomic_barrier_enable,
+        b_streaming=b_streaming,
+        scale_load_path=scale_load_path,
     )
     stream = _fx.Stream(torch.cuda.current_stream(device=a_dev.device))
     _run_compiled(

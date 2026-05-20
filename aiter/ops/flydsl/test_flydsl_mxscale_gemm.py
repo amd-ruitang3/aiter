@@ -684,6 +684,8 @@ def _bench_mxscale_us(
     wave_specialized_tdm: bool = True,
     l2_prefetch_distance: int = 2,
     use_tdm_store: bool = True,
+    b_streaming: bool = False,
+    scale_load_path: str = "tdm",
     use_graph: bool = False,
     warmup: int = 10,
     iters: int = 100,
@@ -736,6 +738,8 @@ def _bench_mxscale_us(
             wave_specialized_tdm=wave_specialized_tdm,
             l2_prefetch_distance=l2_prefetch_distance,
             use_tdm_store=eff_use_tdm_store,
+            b_streaming=b_streaming,
+            scale_load_path=scale_load_path,
         )
 
     # Warmup: JIT-compile + bind the CompiledFunction on the launcher.
@@ -775,7 +779,8 @@ def _print_bench_result(args, latency_us: float) -> None:
         f"warp=({args.m_warp},{args.n_warp}) nb={args.num_buffers} "
         f"sk={args.split_k} cluster=({args.cluster_m},{args.cluster_n}) "
         f"wst={args.wave_specialized_tdm} l2pf={args.l2_prefetch_distance} "
-        f"tdms={args.use_tdm_store and args.split_k == 1}"
+        f"tdms={args.use_tdm_store and args.split_k == 1} "
+        f"bs={args.b_streaming} slp={args.scale_load_path}"
     )
     print(f"  latency = {latency_us:.3f} us")
     print(f"  TFLOPS  = {tflops:.2f}")
@@ -826,6 +831,18 @@ def _bench_main():
     )
     p.add_argument("--l2-prefetch-distance", type=int, default=2)
     p.add_argument(
+        "--b-streaming",
+        action="store_true",
+        default=False,
+        help="Enable the upstream B-streaming compute schedule.",
+    )
+    p.add_argument(
+        "--scale-load-path",
+        choices=["tdm", "buffer_lds_stage", "buffer_lds_stage_ab_split"],
+        default="tdm",
+        help="Scale load path passed to the FlyDSL kernel builder.",
+    )
+    p.add_argument(
         "--use-graph",
         action="store_true",
         default=False,
@@ -861,6 +878,8 @@ def _bench_main():
         wave_specialized_tdm=args.wave_specialized_tdm,
         l2_prefetch_distance=args.l2_prefetch_distance,
         use_tdm_store=args.use_tdm_store,
+        b_streaming=args.b_streaming,
+        scale_load_path=args.scale_load_path,
         use_graph=args.use_graph,
         warmup=args.warmup,
         iters=args.iters,

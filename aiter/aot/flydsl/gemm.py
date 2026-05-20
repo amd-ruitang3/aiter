@@ -354,6 +354,8 @@ def _compile_mxscale_to_cache(
     cluster_m: int,
     cluster_n: int,
     waves_per_eu: int,
+    b_streaming: bool = False,
+    scale_load_path: str = "tdm",
     **kwargs,
 ):
     del kwargs
@@ -409,6 +411,8 @@ def _compile_mxscale_to_cache(
         wave_specialized_tdm=wave_specialized_tdm,
         split_k=split_k,
         use_scale_opsel=use_scale_opsel,
+        b_streaming=b_streaming,
+        scale_load_path=scale_load_path,
     )
     _compile_executable_to_cache(
         exe,
