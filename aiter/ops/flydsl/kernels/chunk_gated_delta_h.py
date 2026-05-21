@@ -152,7 +152,7 @@ def compile_chunk_gated_delta_h(
 
     # Bump revision so the FlyDSL JIT disk cache (~/.flydsl/cache/) invalidates
     # on revision change (port of FlyDSL commit d4643e0e).
-    _K5_KERNEL_REVISION = 22  # OPT-D/H/F/7/4 + OPT-K + OPT-W + OPT-DBW + OPT-VC (vmcnt-spread; gated by N_REPEAT==1 -- BV=16 spreads g/gk/u into GEMM1; BV>=32 emits them in prologue before GEMM1 to recover rev5 timing)
+    _K5_KERNEL_REVISION = 23  # OPT-D/H/F/7/4 + OPT-K + OPT-W + OPT-DBW + OPT-VC (gated by N_REPEAT==1); OPT-W also gated by N_REPEAT==1 (BV>=32 emits w_next prefetch in batch before GEMM2 to fully match rev5 scheduling on those shapes)
 
     GPU_ARCH = get_rocm_arch()
     allocator = SmemAllocator(
@@ -192,6 +192,13 @@ def compile_chunk_gated_delta_h(
     # consumed by the gating / vn = u - bv computation.
     K_STEPS_PER_BLOCK = 64 // WMMA_K
     OPT_VC_ENABLED = N_REPEAT == 1
+    # OPT-W is gated together with OPT-VC. On BV>=32 (N_REPEAT>=2) the GEMM2
+    # inner loop is also thin enough that interleaving w_next vec_loads into
+    # it causes the SIMD's single VMEM port to bottleneck on certain varlen
+    # shapes. Disabling the interleave on BV>=32 falls back to the rev5-style
+    # batched issue right before GEMM2, where the full MFMA chain hides the
+    # HBM latency.
+    OPT_W_ENABLED = N_REPEAT == 1
     NUM_INNER_SLOTS = NUM_K_BLOCKS * K_STEPS_PER_BLOCK * N_REPEAT
     NUM_GK_LOADS_CT = (NUM_K_BLOCKS * 4) if USE_GK else 0
     NUM_G_LOADS_CT = (1 + 4) if USE_G else 0  # g_last + 4 g_row
@@ -872,17 +879,31 @@ def compile_chunk_gated_delta_h(
             NUM_W_NEXT_LOADS = NUM_K_BLOCKS * NUM_LOAD_BATCHES_64
             w_next_prefetch = [None] * NUM_W_NEXT_LOADS
 
+            # OPT-W prologue path (BV>=32): issue all w_next vec_loads as a
+            # BATCH right before GEMM2 starts, matching the rev5 scheduling.
+            # The interleaved per-(kb,bt_s) issue inside GEMM2 below is then
+            # skipped. ``const_expr`` ensures the FlyDSL AST rewriter treats
+            # this branch as a compile-time const (no dispatch wrapper).
+            if const_expr(not OPT_W_ENABLED):
+                for _i in range_constexpr(NUM_W_NEXT_LOADS):
+                    w_next_prefetch[_i] = w_.vec_load(
+                        (fx.Index(w_next_prefetch_off[_i]),), LOAD_VEC_WIDTH
+                    )
+
             for kb in range_constexpr(NUM_K_BLOCKS):
                 for bt_s in range_constexpr(BT_STEPS):
                     # OPT-W: issue one w-next vec_load per (kb, bt_s) slot.
                     # NUM_K_BLOCKS * BT_STEPS == NUM_W_NEXT_LOADS for the
                     # current (K=128, BT=64) config (4 == 4), so every slot
-                    # gets exactly one load.
+                    # gets exactly one load. Skipped when OPT_W_ENABLED is
+                    # False (BV>=32) since the batch was already issued above.
                     w_slot = kb * BT_STEPS + bt_s
-                    if w_slot < NUM_W_NEXT_LOADS:
-                        w_next_prefetch[w_slot] = w_.vec_load(
-                            (fx.Index(w_next_prefetch_off[w_slot]),), LOAD_VEC_WIDTH
-                        )
+                    if const_expr(OPT_W_ENABLED):
+                        if w_slot < NUM_W_NEXT_LOADS:
+                            w_next_prefetch[w_slot] = w_.vec_load(
+                                (fx.Index(w_next_prefetch_off[w_slot]),),
+                                LOAD_VEC_WIDTH,
+                            )
 
                     k_col_tr = wid * fx.Int32(16) + tr_col_sub * fx.Int32(4)
                     bt_row_tr = (
