@@ -152,7 +152,7 @@ def compile_chunk_gated_delta_h(
 
     # Bump revision so the FlyDSL JIT disk cache (~/.flydsl/cache/) invalidates
     # on revision change (port of FlyDSL commit d4643e0e).
-    _K5_KERNEL_REVISION = 17  # OPT-D/H/F/7/4 + OPT-K + OPT-W + OPT-DBW + OPT-VC (vmcnt-spread: GEMM1 prefetch schedule hoisted to compile-scope, lambda+default-args emitters)
+    _K5_KERNEL_REVISION = 22  # OPT-D/H/F/7/4 + OPT-K + OPT-W + OPT-DBW + OPT-VC (vmcnt-spread; gated by N_REPEAT==1 -- BV=16 spreads g/gk/u into GEMM1; BV>=32 emits them in prologue before GEMM1 to recover rev5 timing)
 
     GPU_ARCH = get_rocm_arch()
     allocator = SmemAllocator(
@@ -181,28 +181,44 @@ def compile_chunk_gated_delta_h(
     # scope so they are pure Python ints/lists -- the FlyDSL AST rewriter
     # only touches the @flyc.kernel body below, so any control flow here
     # is safe to mix as ordinary Python.
+    # OPT-VC enablement gate: only spread prefetch into GEMM1 when N_REPEAT
+    # == 1 (i.e. BV == WMMA_N == 16). When OPT_VC_ENABLED is False (BV>=32),
+    # emit all g/gk/u prefetch in a BATCH BEFORE GEMM1 starts (via
+    # PROLOGUE_EMITTER_CT), exactly matching the pre-OPT-VC (rev5) layout --
+    # this leaves the full GEMM1 MFMA chain to overlap the HBM latency.
+    # An earlier attempt (rev21) routed disabled-BV prefetch to the GEMM1
+    # tail (TAIL_EMITTER_CT), which empirically lost 9-14% on BV>=32 shapes
+    # because the prefetched values had no MFMA to hide behind before being
+    # consumed by the gating / vn = u - bv computation.
     K_STEPS_PER_BLOCK = 64 // WMMA_K
+    OPT_VC_ENABLED = N_REPEAT == 1
     NUM_INNER_SLOTS = NUM_K_BLOCKS * K_STEPS_PER_BLOCK * N_REPEAT
     NUM_GK_LOADS_CT = (NUM_K_BLOCKS * 4) if USE_GK else 0
     NUM_G_LOADS_CT = (1 + 4) if USE_G else 0  # g_last + 4 g_row
     NUM_U_LOADS_CT = N_REPEAT * 4
     NUM_EXTRA_LOADS_CT = NUM_GK_LOADS_CT + NUM_G_LOADS_CT + NUM_U_LOADS_CT
-    if NUM_INNER_SLOTS > 0 and NUM_EXTRA_LOADS_CT > 0:
+    if OPT_VC_ENABLED and NUM_INNER_SLOTS > 0 and NUM_EXTRA_LOADS_CT > 0:
         EXTRAS_PER_SLOT_CT = (
             NUM_EXTRA_LOADS_CT + NUM_INNER_SLOTS - 1
         ) // NUM_INNER_SLOTS
     else:
         EXTRAS_PER_SLOT_CT = 0
-    # Map each emitter idx (0..NUM_EXTRA_LOADS_CT-1) to either an inner-slot
-    # bucket OR to the tail-emit list. Indices are stable across runs.
+    # Map each emitter idx (0..NUM_EXTRA_LOADS_CT-1) to one of three buckets:
+    #   * SLOT_ASSIGN_CT[slot_idx] -- emitted inside GEMM1 at (kb,ks,nr) slot
+    #     (used when OPT_VC_ENABLED is True, BV=16 path)
+    #   * PROLOGUE_EMITTER_CT     -- emitted right BEFORE GEMM1 main loop
+    #     (used when OPT_VC_ENABLED is False, BV>=32 path; matches rev5)
+    #   * TAIL_EMITTER_CT         -- emitted AFTER GEMM1 (kept as future-
+    #     facing safety net; not used by the current schedule).
     SLOT_ASSIGN_CT: list[list[int]] = [[] for _ in range(NUM_INNER_SLOTS)]
+    PROLOGUE_EMITTER_CT: list[int] = []
     TAIL_EMITTER_CT: list[int] = []
     for _e_idx in range(NUM_EXTRA_LOADS_CT):
-        if NUM_INNER_SLOTS > 0:
+        if OPT_VC_ENABLED and NUM_INNER_SLOTS > 0:
             _slot = min(_e_idx // max(EXTRAS_PER_SLOT_CT, 1), NUM_INNER_SLOTS - 1)
             SLOT_ASSIGN_CT[_slot].append(_e_idx)
         else:
-            TAIL_EMITTER_CT.append(_e_idx)
+            PROLOGUE_EMITTER_CT.append(_e_idx)
 
     @flyc.kernel(name="chunk_gdn_fwd_h_flydsl_vk")
     def gdn_h_kernel(
@@ -646,10 +662,19 @@ def compile_chunk_gated_delta_h(
 
             # OPT-VC: the prefetch slot-assignment schedule lives in the
             # outer compile_chunk_gated_delta_h scope as SLOT_ASSIGN_CT /
-            # TAIL_EMITTER_CT (pure Python lists) so we don't run any
-            # Python control flow here that the AST rewriter would clobber.
-            # ``extra_load_emitters`` is populated above and is index-
-            # compatible with the static schedule.
+            # PROLOGUE_EMITTER_CT / TAIL_EMITTER_CT (pure Python lists) so
+            # we don't run any Python control flow here that the AST
+            # rewriter would clobber. ``extra_load_emitters`` is populated
+            # above and is index-compatible with the static schedule.
+            #
+            # OPT-VC prologue path (BV>=32): when OPT_VC_ENABLED is False
+            # the schedule routes every emitter into PROLOGUE_EMITTER_CT,
+            # so the entire batch of g/gk/u prefetch is issued HERE -- right
+            # before the GEMM1 main loop begins. This matches the original
+            # pre-OPT-VC (rev5) placement and lets the full MFMA chain hide
+            # the HBM latency of these scalar / dwordx4 loads.
+            for _eidx in PROLOGUE_EMITTER_CT:
+                extra_load_emitters[_eidx]()
 
             for kb in range_constexpr(NUM_K_BLOCKS):
                 for ks in range_constexpr(K_STEPS_PER_BLOCK):
