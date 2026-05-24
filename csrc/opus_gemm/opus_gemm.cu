@@ -19,8 +19,10 @@
 
 #include "opus_gemm_arch.cuh"                      // OpusGfxArch + opus_get_arch_info / opus_get_gfx_arch
 #include "gfx950/opus_gemm_arch_gfx950.cuh"        // opus_dispatch_a16w16_gfx950<T> / opus_a16w16_tune_dispatch_gfx950<T>
+#include "gfx942/opus_gemm_arch_gfx942.cuh"        // opus_dispatch_a16w16_gfx942<T> / opus_a16w16_tune_dispatch_gfx942<T>
 #include "opus_gemm_common.cuh"
 #include "gfx950/opus_gemm_heuristic_dispatch_gfx950.cuh"  // OpusA16W16NoscaleKernel
+#include "gfx942/opus_gemm_heuristic_dispatch_gfx942.cuh"
 #include "opus_gemm_manifest.h"                    // a8w8 launcher symbols
 #include "opus_gemm_utils.cuh"                     // bf16_t / fp32_t
 
@@ -72,7 +74,8 @@ OpusA16W16NoscaleKernel opus_dispatch_a16w16(int M, int N, int K, int batch, boo
   {
     case OpusGfxArch::Gfx950:
       return opus_dispatch_a16w16_gfx950<CDataType>(M, N, K, batch, has_bias);
-    // future: case OpusGfxArch::Gfx942: return opus_dispatch_a16w16_gfx942<CDataType>(M, N, K, batch, has_bias);
+    case OpusGfxArch::Gfx942:
+      return opus_dispatch_a16w16_gfx942<CDataType>(M, N, K, batch, has_bias);
     default:
     {
       const auto &info = opus_get_arch_info();
@@ -94,7 +97,8 @@ opus_a16w16_tune_dispatch(int id)
   {
     case OpusGfxArch::Gfx950:
       return opus_a16w16_tune_dispatch_gfx950<CDataType>(id);
-    // future: case OpusGfxArch::Gfx942: return opus_a16w16_tune_dispatch_gfx942<CDataType>(id);
+    case OpusGfxArch::Gfx942:
+      return opus_a16w16_tune_dispatch_gfx942<CDataType>(id);
     default:
     {
       const auto &info = opus_get_arch_info();
@@ -174,6 +178,8 @@ void opus_gemm(
     // appear), so a non-empty bias is always safe at this entry.
     int batch = XQ.size(0);
     const bool has_bias = bias.has_value();
+    // splitK=0 means "launcher decides". Non-splitk launchers ignore the
+    // arg; gfx942 splitk launchers auto-pick (~1 WG per CU) internally.
     if (Y.dtype() == AITER_DTYPE_bf16)
     {
       opus_dispatch_a16w16<bf16_t>(M, N, K, batch, has_bias)(XQ, WQ, Y, bias, 0);
@@ -209,6 +215,9 @@ void opus_gemm(
 // splitk kids live in [200, 300) with non-OOB variants at [1200, 1300).
 static constexpr int OPUS_SPLITK_KID_MIN = 200;
 static constexpr int OPUS_SPLITK_KID_MAX = 300;
+// gfx942 splitk kids live at +50000 offset: [50200, 50300).
+// Same dispatch rule (force <fp32_t> for splitk) applies regardless of arch.
+static constexpr int OPUS_GFX942_KID_OFFSET = 50000;
 // Split-barrier a16w16 kids live in [4, 10) with non-OOB variants at [1004, 1010).
 // Cpol variants (3 cache-policy groups) live at +2000/+3000/+4000 offsets.
 static constexpr int OPUS_A16W16_SB_KID_MIN = 4;
@@ -226,7 +235,9 @@ static inline bool opus_kid_is_splitk(int kid)
 {
   return (kid >= OPUS_SPLITK_KID_MIN && kid < OPUS_SPLITK_KID_MAX) ||
          (kid >= OPUS_SPLITK_KID_MIN + OPUS_NOOOB_KID_OFFSET &&
-          kid < OPUS_SPLITK_KID_MAX + OPUS_NOOOB_KID_OFFSET);
+          kid < OPUS_SPLITK_KID_MAX + OPUS_NOOOB_KID_OFFSET) ||
+         (kid >= OPUS_SPLITK_KID_MIN + OPUS_GFX942_KID_OFFSET &&
+          kid < OPUS_SPLITK_KID_MAX + OPUS_GFX942_KID_OFFSET);
 }
 
 static inline bool opus_kid_is_a16w16_sb(int kid)

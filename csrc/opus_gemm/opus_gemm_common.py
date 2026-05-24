@@ -43,6 +43,13 @@ class OpusGemmInstance:
     cachectl_a: int = -1
     cachectl_b: int = -1
 
+    # Optional arch prefix (e.g. "gfx942") inserted after the
+    # "opus_gemm" stem in the generated launcher name. Empty = no
+    # prefix. Used by per-arch kernel lists so gfx942 launcher symbols
+    # cannot collide with gfx950 ones even if they happen to share a
+    # tile / MFMA descriptor.
+    arch_prefix: str = ""
+
     @property
     def name(self) -> str:
         parts = [
@@ -52,14 +59,22 @@ class OpusGemmInstance:
             "x".join(map(str, [self.W_M, self.W_N, self.W_K])),
             "x".join(map(str, [self.GROUP_M, self.GROUP_N, self.GROUP_K])),
         ]
+        if self.arch_prefix:
+            parts.insert(1, self.arch_prefix)
+        # tag inserts shift right by one slot when arch_prefix is set
+        tag_at = 1 + (1 if self.arch_prefix else 0)
         if self.kernel_tag == "a16w16_flatmm":
-            parts.insert(1, "flatmm")
+            parts.insert(tag_at, "flatmm")
             parts.append(f"wgpcu{self.WG_PER_CU}")
         elif self.kernel_tag == "a16w16_flatmm_splitk":
-            parts.insert(1, "flatmm_splitk")
+            parts.insert(tag_at, "flatmm_splitk")
             parts.append(f"wgpcu{self.WG_PER_CU}")
         elif self.kernel_tag == "a16w16_persistent":
-            parts.insert(1, "persistent")
+            parts.insert(tag_at, "persistent")
+        elif self.kernel_tag == "a16w16_splitk":
+            parts.insert(tag_at, "splitk")
+        elif self.kernel_tag == "a16w16_splitk_fused":
+            parts.insert(tag_at, "splitk_fused")
         if not self.has_oob:
             parts.append("nooob")
         # Legacy cache policy = traits default for split-barrier &
@@ -91,7 +106,7 @@ def _a16w16(bs, bm, bn, bk, tn, wm, wn, wk, has_oob=True, cachectl_a=0, cachectl
     matches the traits-default cache policy for the split-barrier pipeline
     (see opus_gemm_a16w16_traits_gfx950 in
     csrc/opus_gemm/include/gfx950/opus_gemm_traits_a16w16_gfx950.cuh).
-    This is the "legacy" policy used by KID 4..9 and 1004..1009 — the
+    This is the "legacy" policy used by KID 4..9 and 1004..1009 -- the
     `_LEGACY_CACHECTL` special-case in OpusGemmInstance.name keeps these
     kids emitting the bare `..._0x0x0` symbol (no `_cA0cB17` suffix) so
     the production heuristic dispatcher and the opus tuned CSV stay
@@ -187,11 +202,11 @@ a8w8_kernels_list = {
 }
 
 a16w16_kernels_list = {
-    # ── MFMA 16x16x32, T_N=2, BS=256 (2-block/CU capable) ──
+    # -- MFMA 16x16x32, T_N=2, BS=256 (2-block/CU capable) --
     # 3:  _a16w16(256, 128, 128, 32,  2, 16, 16, 32),  # disabled: intermittent accuracy (suspected compiler issue with VGPR=104/AGPR=64)
     4:  _a16w16(256, 128, 256, 32,  2, 16, 16, 32),
     5:  _a16w16(256, 256, 128, 32,  2, 16, 16, 32),
-    # ── MFMA 16x16x32, T_N=4, BS=512 (1-block/CU) ──
+    # -- MFMA 16x16x32, T_N=4, BS=512 (1-block/CU) --
     6:  _a16w16(512, 128, 128, 64,  4, 16, 16, 32),
     7:  _a16w16(512, 256, 128, 64,  4, 16, 16, 32),
     8:  _a16w16(512, 128, 256, 64,  4, 16, 16, 32),
@@ -278,9 +293,9 @@ a16w16_kernels_list_nooob = {
 }
 
 # CPOL variants for a16w16: 3 policies per kid, tuner picks best per shape.
-#   M-heavy: A=SC0(1, LLC Evict), B=BYPASS_L2(17) — large A streams, small B cached
-#   N-heavy: A=BYPASS_L2(17), B=SC0(1, LLC Evict) — swapped
-#   Balanced: A=LRU(0), B=LRU(0) — both cached normally
+#   M-heavy: A=SC0(1, LLC Evict), B=BYPASS_L2(17) -- large A streams, small B cached
+#   N-heavy: A=BYPASS_L2(17), B=SC0(1, LLC Evict) -- swapped
+#   Balanced: A=LRU(0), B=LRU(0) -- both cached normally
 _CACHECTL_CONFIGS = [
     (2000, 1, 17, "Mheavy"),   # kid_offset, cachectl_a, cachectl_b
     (3000, 17, 1, "Nheavy"),
@@ -315,7 +330,7 @@ a16w16_flatmm_splitk_kernels_list_nooob = {
     for kid, inst in a16w16_flatmm_splitk_kernels_list.items()
 }
 
-# ── a16w16 persistent (M-outer + N-fast XCD swizzle) ──────────────────────
+# -- a16w16 persistent (M-outer + N-fast XCD swizzle) ----------------------
 #
 # Pipeline:
 #   csrc/opus_gemm/include/gfx950/opus_gemm_pipeline_a16w16_persistent_gfx950.cuh
@@ -329,7 +344,7 @@ a16w16_flatmm_splitk_kernels_list_nooob = {
 #     tile_idx:   0..5 (see _PERSISTENT_TILES below)
 #   nooob mirror at +1000: kid range [1300, 1324).
 #
-# Total: 6 tile × 4 cpol × {has_oob, nooob} = 48 kid.
+# Total: 6 tile x 4 cpol x {has_oob, nooob} = 48 kid.
 #
 # Persistent kernel locks BLOCK_SIZE=512, T_M=2, T_N=4, MFMA 16x16x32
 # (matches the standalone reference gemm_a16w16_8wave_mouter.cc).
@@ -362,7 +377,7 @@ def _a16w16_persistent(bm, bn, bk, has_oob=True,
 # require a different T_N or W_K axis -- left as future work.
 _PERSISTENT_TILES = [
     # (B_M, B_N, B_K)
-    (256, 256, 64),  # tile 0: mouter default; 32K×2K×7K best 1208 TFLOPS
+    (256, 256, 64),  # tile 0: mouter default; 32Kx2Kx7K best 1208 TFLOPS
     (128, 256, 64),  # tile 1: narrow M
     (256, 128, 64),  # tile 2: narrow N
     (128, 128, 64),  # tile 3: small
@@ -377,7 +392,7 @@ a16w16_persistent_kernels_list = {
     for i, (bm, bn, bk) in enumerate(_PERSISTENT_TILES)
 }
 
-# Cpol variants (304..315): 3 groups × 4 tiles, mirroring _CACHECTL_CONFIGS
+# Cpol variants (304..315): 3 groups x 4 tiles, mirroring _CACHECTL_CONFIGS
 # but with a single compact base offset per cpol group. Each emitted .so
 # carries its `_cA*cB*` suffix.
 _PERSISTENT_CPOL_GROUPS = [
@@ -410,6 +425,74 @@ a16w16_persistent_kernels_list_cpol_nooob = {
     for kid, inst in a16w16_persistent_kernels_list_cpol.items()
 }
 
+# -- gfx942 kernel lists ------------------------------------------------
+# Kid offset: gfx942 kids live in the 50000+ range so they cannot
+# collide with the gfx950 kid space (which uses 1..9, 200..223,
+# 300..315, plus their +1000 / +2000 / +3000 / +4000 mirrors). The
+# arch routers in gen_instances.py and the C++ dispatchers use the
+# offset to pick the right per-arch path map.
+GFX942_KID_OFFSET = 50000
+
+
+def _a16w16_gfx942(bs, bm, bn, bk, tn, wm, wn, wk):
+    """Factory for gfx942 a16w16 split-barrier kid instances (MFMA 16x16x16)."""
+    vec = 16 // 2  # bf16
+    return OpusGemmInstance(
+        bs, bm, bn, bk,
+        2, tn,            # T_M, T_N
+        wm, wn, wk,       # MFMA
+        vec, vec, 4,      # VEC
+        0, 0, 0,          # GROUP (unused for splitk/split-barrier)
+        "a16w16",
+        ["fp32_t", "bf16_t"],
+        arch_prefix="gfx942",
+    )
+
+
+def _a16w16_splitk_gfx942(bs, bm, bn, bk, tn, wm, wn, wk, fused=False):
+    """Factory for gfx942 a16w16 splitk kid instances (independent or fused reduce)."""
+    vec = 16 // 2  # bf16
+    return OpusGemmInstance(
+        bs, bm, bn, bk,
+        2, tn,
+        wm, wn, wk,
+        vec, vec, 4,
+        0, 0, 0,
+        "a16w16_splitk_fused" if fused else "a16w16_splitk",
+        ["fp32_t"],
+        arch_prefix="gfx942",
+    )
+
+
+# Split-barrier (kid 50006): 512x128x128x64, MFMA 16x16x16, T_M=2, T_N=4.
+gfx942_a16w16_kernels_list = {
+    50006: _a16w16_gfx942(512, 128, 128, 64, 4, 16, 16, 16),
+}
+
+# Splitk family: independent-reduce kids.
+#   50200: 512x128x128x64 (large M sweet spot)
+#   50202: 256x128x64x64  (small-N tile)
+#   50203: 256x64x64x64   (small-MN; E_M=1 path in asm header)
+gfx942_a16w16_splitk_kernels_list = {
+    50200: _a16w16_splitk_gfx942(512, 128, 128, 64, 4, 16, 16, 16),
+    50202: _a16w16_splitk_gfx942(256, 128,  64, 64, 2, 16, 16, 16),
+    50203: _a16w16_splitk_gfx942(256,  64,  64, 64, 2, 16, 16, 16),
+}
+
+# Splitk fused-reduce (kid 50201): same tile as 50200 but reduce is
+# fused into the main kernel epilogue (lower launch overhead, higher
+# per-split cost; generally slower than 50200 -- kept for completeness).
+gfx942_a16w16_splitk_fused_kernels_list = {
+    50201: _a16w16_splitk_gfx942(512, 128, 128, 64, 4, 16, 16, 16, fused=True),
+}
+
+gfx942_kernels_list = {
+    **gfx942_a16w16_kernels_list,
+    **gfx942_a16w16_splitk_kernels_list,
+    **gfx942_a16w16_splitk_fused_kernels_list,
+}
+
+
 # combined list (used by production gen_instances / dispatch)
 kernels_list = {
     **a8w8_scale_kernels_list,
@@ -425,6 +508,7 @@ kernels_list = {
     **a16w16_persistent_kernels_list_cpol,
     **a16w16_persistent_kernels_list_nooob,
     **a16w16_persistent_kernels_list_cpol_nooob,
+    **gfx942_kernels_list,
 }
 
 default_kernels_dict = {
@@ -437,7 +521,7 @@ default_kernels_dict = {
 
 # =============================================================================
 # Subset-compile kid taxonomy (consumed by gen_instances.py for the
-# `HEURISTIC_DEFAULT_KIDS ⊆ S` assert + the per-pipeline classifier sets).
+# `HEURISTIC_DEFAULT_KIDS ? S` assert + the per-pipeline classifier sets).
 #
 # These are pure data constants -- no tuner / runtime logic lives here. The
 # tune-time helpers (candidate_kids_for_shape, candidate_splitK,
@@ -449,8 +533,11 @@ default_kernels_dict = {
 # Splitk kids: a16w16_flatmm_splitk pipeline (kid 200..223 + nooob mirror).
 # These are bias-aware. They are the only kids that consume a literal `splitK`
 # KBatch argument.
-SPLITK_KIDS = frozenset(a16w16_flatmm_splitk_kernels_list.keys()) | frozenset(
-    a16w16_flatmm_splitk_kernels_list_nooob.keys()
+SPLITK_KIDS = (
+    frozenset(a16w16_flatmm_splitk_kernels_list.keys())
+    | frozenset(a16w16_flatmm_splitk_kernels_list_nooob.keys())
+    | frozenset(gfx942_a16w16_splitk_kernels_list.keys())
+    | frozenset(gfx942_a16w16_splitk_fused_kernels_list.keys())
 )
 
 # Non-splitk a16w16-family kids: split-barrier 4..9 + cpol/nooob mirrors,
@@ -465,6 +552,7 @@ NON_SPLITK_KIDS = (
     | frozenset(a16w16_persistent_kernels_list_cpol.keys())
     | frozenset(a16w16_persistent_kernels_list_nooob.keys())
     | frozenset(a16w16_persistent_kernels_list_cpol_nooob.keys())
+    | frozenset(gfx942_a16w16_kernels_list.keys())
 )
 
 # Bias-aware kids: split-barrier (4..9 + cpol/nooob mirrors) and the entire
@@ -475,6 +563,7 @@ BIAS_AWARE_KIDS = (
     | frozenset(a16w16_kernels_list_nooob.keys())
     | frozenset(a16w16_kernels_list_cpol.keys())
     | frozenset(a16w16_kernels_list_cpol_nooob.keys())
+    | frozenset(gfx942_a16w16_kernels_list.keys())
     | SPLITK_KIDS
 )
 
@@ -488,7 +577,15 @@ BIAS_AWARE_KIDS = (
 # gen_instances.py asserts HEURISTIC_DEFAULT_KIDS.issubset(S) before writing
 # the sidecar, so any drift here vs the C++ side surfaces at codegen time
 # rather than at runtime.
-HEURISTIC_DEFAULT_KIDS = frozenset(
+# Per-arch heuristic defaults. The unioned set is exposed as
+# HEURISTIC_DEFAULT_KIDS for back-compat (multi-arch / unknown-arch builds);
+# callers that know the target arch should prefer heuristic_kids_for_arch()
+# so the subset-compile contract (HEURISTIC_DEFAULT_KIDS ? S) holds against
+# the arch-filtered S that gen_instances.py emits. Otherwise the gfx950
+# heuristic kids 200/206/208/300 (+1k mirrors) get permanently flagged
+# missing on a gfx942 build, triggering an endless rebuild loop from
+# _ensure_kids_compiled in opus_gemm_tune.py.
+HEURISTIC_DEFAULT_KIDS_GFX950 = frozenset(
     {
         # splitk fallback (small M / non-aligned big M)
         200,
@@ -502,6 +599,46 @@ HEURISTIC_DEFAULT_KIDS = frozenset(
         1300,  # persistent (256, 256, 64)
     }
 )
+
+HEURISTIC_DEFAULT_KIDS_GFX942 = frozenset(
+    {
+        # gfx942 heuristic dispatcher fallbacks. MUST match the function-
+        # pointer returns of opus_a16w16_heuristic_dispatch_gfx942() in
+        # csrc/opus_gemm/include/gfx942/opus_gemm_heuristic_dispatch_gfx942.cuh.
+        # The current heuristic can return 50006 / 50200 / 50202 / 50203
+        # depending on tile-coverage vs CU count and N-bucket; all four must
+        # bake.
+        50006,  # gfx942 split-barrier   512x128x128x64 16x16x16 (large problem)
+        50200,  # gfx942 splitk          512x128x128x64 16x16x16 (N > 128)
+        50202,  # gfx942 splitk          256x128x64x64  16x16x16 (64 < N <= 128)
+        50203,  # gfx942 splitk          256x64x64x64   16x16x16 (N <= 64)
+        # Extra gfx942 splitk_fused; not reachable by the heuristic
+        # but baked so opus_gemm_a16w16_tune(id=...) can exercise it and so
+        # a future tuner can promote it via CSV.
+        50201,  # gfx942 splitk_fused    512x128x128x64 16x16x16
+    }
+)
+
+HEURISTIC_DEFAULT_KIDS = HEURISTIC_DEFAULT_KIDS_GFX950 | HEURISTIC_DEFAULT_KIDS_GFX942
+
+
+def heuristic_kids_for_arch(arches):
+    """Return the heuristic-default kid subset whose arch_prefix matches.
+
+    ``arches`` is an iterable of lowercase arch strings (e.g. ``{"gfx942"}``)
+    or ``None`` (caller does not know / multi-arch build) -- in the ``None``
+    case the full union is returned so the legacy multi-arch behaviour is
+    preserved.
+    """
+    if arches is None:
+        return HEURISTIC_DEFAULT_KIDS
+    arches = {a.lower() for a in arches}
+    out = frozenset()
+    if "gfx950" in arches:
+        out = out | HEURISTIC_DEFAULT_KIDS_GFX950
+    if "gfx942" in arches:
+        out = out | HEURISTIC_DEFAULT_KIDS_GFX942
+    return out
 
 
 def _opus_sidecar_path():

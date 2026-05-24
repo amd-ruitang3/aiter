@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2025-2026, Advanced Micro Devices, Inc. All rights reserved.
 """
-aiter.ops.opus — opus kernel Python user-facing API.
+aiter.ops.opus -- opus kernel Python user-facing API.
 
 Per-dtype modules. a16w16 lives here today; a8w8 / a8w8_blockscale
 arrive in follow-up PRs. Each module owns its own Python surface and
@@ -9,9 +9,9 @@ pybind bindings but shares the underlying JIT module
 `module_deepgemm_opus` built from csrc/opus_gemm/.
 
 Public API:
-  * gemm_a16w16_opus       — shape-driven wrapper (CSV lookup + C++
+  * gemm_a16w16_opus       -- shape-driven wrapper (CSV lookup + C++
                              heuristic fallback). Typical user entry.
-  * opus_gemm_a16w16_tune  — id-based low-level binding (tuner / override).
+  * opus_gemm_a16w16_tune  -- id-based low-level binding (tuner / override).
 
 Arch gating
 -----------
@@ -28,12 +28,13 @@ import warnings
 
 from ._arch import _detect_arch
 
-_SUPPORTED = {"gfx950"}
+_SUPPORTED = {"gfx950", "gfx942"}
 _FEATURE = "aiter.ops.opus (a16w16)"
 _HINT = (
-    "opus_gemm uses gfx950-only intrinsics (MFMA, ds_read_b64_tr) and "
-    "the 160 KiB LDS budget. Set GPU_ARCHS=gfx950 (or run on a gfx950 "
-    "device) to use this module."
+    "opus_gemm supports gfx950 (MFMA 16x16x32 / ds_read_b64_tr / 160 KiB "
+    "LDS) and gfx942 (MFMA 16x16x16 / ds_read_b128 / 64 KiB LDS). Set "
+    "GPU_ARCHS to one of these (or run on a matching device) to use this "
+    "module."
 )
 
 _arch_ok, _detected_arch = _detect_arch(_SUPPORTED)

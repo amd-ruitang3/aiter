@@ -12,12 +12,16 @@ import torch
 from opus_gemm_common import (
     HEURISTIC_DEFAULT_KIDS,
     OpusGemmInstance,
+    heuristic_kids_for_arch,
     a8w8_kernels_list,
     a8w8_scale_kernels_list,
     a16w16_flatmm_kernels_list,
     a16w16_flatmm_splitk_kernels_list,
     a16w16_kernels_list,
     default_kernels_dict,
+    gfx942_a16w16_kernels_list,
+    gfx942_a16w16_splitk_fused_kernels_list,
+    gfx942_a16w16_splitk_kernels_list,
     kernels_list,
 )
 
@@ -28,6 +32,16 @@ PIPELINE_HEADER_MAP = {
     "a16w16_flatmm": "gfx950/opus_gemm_pipeline_a16w16_flatmm_gfx950.cuh",
     "a16w16_flatmm_splitk": "gfx950/opus_gemm_pipeline_a16w16_flatmm_splitk_gfx950.cuh",
     "a16w16_persistent": "gfx950/opus_gemm_pipeline_a16w16_persistent_gfx950.cuh",
+    # gfx942 tags
+    "a16w16_splitk": "gfx942/opus_gemm_pipeline_a16w16_splitk.cuh",
+    "a16w16_splitk_fused": "gfx942/opus_gemm_pipeline_a16w16_splitk_fused.cuh",
+}
+
+# Per-arch override for the split-barrier a16w16 tag. gfx942 reuses the
+# tag "a16w16" but lives under its own pipeline / traits headers; the
+# lookup helpers below consult this map first based on k.arch_prefix.
+GFX942_PIPELINE_HEADER_MAP = {
+    "a16w16": "gfx942/opus_gemm_pipeline_a16w16.cuh",
 }
 
 # Traits header carries the traits struct + kargs struct definitions for a
@@ -44,6 +58,16 @@ TRAITS_HEADER_MAP = {
     "a16w16_flatmm": "gfx950/opus_gemm_traits_a16w16_gfx950.cuh",
     "a16w16_flatmm_splitk": "gfx950/opus_gemm_traits_a16w16_gfx950.cuh",
     "a16w16_persistent": "gfx950/opus_gemm_traits_a16w16_gfx950.cuh",
+    # gfx942 shares one traits header across split-barrier and both splitk
+    # variants. The splitk / splitk_fused kargs structs live INSIDE their
+    # respective pipeline headers, so the fused host TU forward-declares
+    # them inline rather than relying on the traits header for splitk
+    # kargs.
+    "a16w16_splitk": "gfx942/opus_gemm_traits_a16w16.cuh",
+    "a16w16_splitk_fused": "gfx942/opus_gemm_traits_a16w16.cuh",
+}
+GFX942_TRAITS_HEADER_MAP = {
+    "a16w16": "gfx942/opus_gemm_traits_a16w16.cuh",
 }
 
 # Splitk reduce kernel is shared infrastructure used by every
@@ -52,6 +76,15 @@ TRAITS_HEADER_MAP = {
 # device.cu so the linker can pick the GPU IR up.
 SPLITK_REDUCE_HEADER = "gfx950/splitk_reduce_gfx950.cuh"
 
+# Per-tag splitk reduce header. The independent-reduce splitk kernels
+# (gfx950 flatmm_splitk + gfx942 a16w16_splitk) need a host-side reduce
+# launch; gfx942 splitk_fused performs the reduce in-kernel so it does
+# not appear here.
+SPLITK_REDUCE_HEADER_MAP = {
+    "a16w16_flatmm_splitk": "gfx950/splitk_reduce_gfx950.cuh",
+    "a16w16_splitk": "gfx942/splitk_reduce_gfx942.cuh",
+}
+
 KERNEL_FUNC_MAP = {
     "a8w8_scale": "gemm_a8w8_scale_kernel",
     "a8w8": "gemm_a8w8_noscale_kernel",
@@ -59,6 +92,11 @@ KERNEL_FUNC_MAP = {
     "a16w16_flatmm": "gemm_a16w16_flatmm_kernel",
     "a16w16_flatmm_splitk": "gemm_a16w16_flatmm_splitk_kernel",
     "a16w16_persistent": "gemm_a16w16_persistent_kernel",
+    # gfx942: split-barrier reuses gemm_a16w16_kernel (same function
+    # name as gfx950's; the per-arch guards inside the pipeline body
+    # keep them from clashing at codegen time).
+    "a16w16_splitk": "gemm_a16w16_splitk_kernel",
+    "a16w16_splitk_fused": "gemm_a16w16_splitk_fused_kernel",
 }
 
 INPUT_DTYPE_MAP = {
@@ -68,6 +106,8 @@ INPUT_DTYPE_MAP = {
     "a16w16_flatmm": ("bf16_t", "bf16_t"),
     "a16w16_flatmm_splitk": ("bf16_t", "bf16_t"),
     "a16w16_persistent": ("bf16_t", "bf16_t"),
+    "a16w16_splitk": ("bf16_t", "bf16_t"),
+    "a16w16_splitk_fused": ("bf16_t", "bf16_t"),
 }
 
 # Tags whose launchers take 3 torch tensors (XQ, WQ, Y) + int splitK. Splitk
@@ -79,6 +119,8 @@ NOSCALE_TAGS = {
     "a16w16_flatmm",
     "a16w16_flatmm_splitk",
     "a16w16_persistent",
+    "a16w16_splitk",
+    "a16w16_splitk_fused",
 }
 
 # a16w16-family tags whose launchers land in opus_gemm_a16w16_tune_lookup.h
@@ -90,6 +132,16 @@ A16W16_TUNE_TAGS = {
     "a16w16_flatmm",
     "a16w16_flatmm_splitk",
     "a16w16_persistent",
+    "a16w16_splitk",
+    "a16w16_splitk_fused",
+}
+
+# Splitk tags that force their lookup-table entry to <fp32_t> (the main
+# kernel writes a fp32 workspace; Y dtype is handled by the reduce path).
+SPLITK_TAGS = {
+    "a16w16_flatmm_splitk",
+    "a16w16_splitk",
+    "a16w16_splitk_fused",
 }
 
 TRAITS_NAME_MAP = {
@@ -99,6 +151,12 @@ TRAITS_NAME_MAP = {
     "a16w16_flatmm": "opus_gemm_a16w16_flatmm_traits_gfx950",
     "a16w16_flatmm_splitk": "opus_flatmm_splitk_traits_gfx950",
     "a16w16_persistent": "opus_gemm_a16w16_persistent_traits_gfx950",
+    # gfx942 class names carry no arch suffix; see gfx942/opus_gemm_traits_a16w16.cuh.
+    "a16w16_splitk": "opus_gemm_a16w16_traits",
+    "a16w16_splitk_fused": "opus_gemm_a16w16_traits",
+}
+GFX942_TRAITS_NAME_MAP = {
+    "a16w16": "opus_gemm_a16w16_traits",
 }
 
 KARGS_NAME_MAP = {
@@ -108,10 +166,25 @@ KARGS_NAME_MAP = {
     "a16w16_flatmm": "opus_gemm_flatmm_kargs_gfx950",
     "a16w16_flatmm_splitk": "opus_gemm_flatmm_splitk_kargs_gfx950",
     "a16w16_persistent": "opus_gemm_persistent_kargs_gfx950",
+    "a16w16_splitk": "opus_gemm_splitk_kargs",
+    "a16w16_splitk_fused": "opus_gemm_splitk_fused_kargs",
 }
+GFX942_KARGS_NAME_MAP = {
+    "a16w16": "opus_gemm_noscale_kargs",
+}
+
+
+def _lookup(k, default_map, arch_map):
+    """Pick the gfx942 override when k.arch_prefix=='gfx942', else default."""
+    if getattr(k, "arch_prefix", "") == "gfx942" and k.kernel_tag in arch_map:
+        return arch_map[k.kernel_tag]
+    return default_map[k.kernel_tag]
+
 
 WARP_SIZE = 64
 VALID_BF16_MFMA = {(16, 16, 32), (32, 32, 16)}
+# gfx942 a16w16 family supports only the 16x16x16 BF16 MFMA shape.
+VALID_GFX942_BF16_MFMA = {(16, 16, 16)}
 # Flatmm pipeline currently only supports W_M < 32 (ra layout relies on
 # LOAD_GROUP_M_LANE == 1). W_M == 32 (LGML == 4) path not rewritten.
 VALID_FLATMM_MFMA = {(16, 16, 32)}
@@ -161,7 +234,7 @@ class opus_gemm_codegen:
         # device TU only).
         self._kid_pipeline_header = {}
 
-    # ── a16w16 compile-time + VGPR spill validator ──
+    # -- a16w16 compile-time + VGPR spill validator --
 
     @staticmethod
     def _validate_a16w16(k: OpusGemmInstance):
@@ -175,28 +248,33 @@ class opus_gemm_codegen:
         num_waves = k.T_M * k.T_N * T_K
         smem_linear_wave = WARP_SIZE * 16 // sizeof_da  # 512
 
-        # ── Hardware ──
+        # -- Hardware --
         if k.BLOCK_SIZE > 512:
             errors.append(f"BLOCK_SIZE={k.BLOCK_SIZE} exceeds 512")
 
-        # ── Pipeline: T_M must be 2 (split-barrier) ──
+        # -- Pipeline: T_M must be 2 (split-barrier) --
         if k.T_M != 2:
             errors.append(f"T_M={k.T_M} must be 2")
 
-        # ── Traits: BLOCK_SIZE = T_M * T_N * T_K * WARP_SIZE ──
+        # -- Traits: BLOCK_SIZE = T_M * T_N * T_K * WARP_SIZE --
         if k.BLOCK_SIZE != num_waves * WARP_SIZE:
             errors.append(
                 f"BLOCK_SIZE={k.BLOCK_SIZE} != "
                 f"{k.T_M}*{k.T_N}*{T_K}*{WARP_SIZE}={num_waves * WARP_SIZE}"
             )
 
-        # ── Layout: T_N % T_M == 0 (rb: T_N/T_M) ──
+        # -- Layout: T_N % T_M == 0 (rb: T_N/T_M) --
         if k.T_N % k.T_M != 0:
             errors.append(f"T_N={k.T_N} not divisible by T_M={k.T_M}")
 
-        # ── MFMA validity ──
-        if (k.W_M, k.W_N, k.W_K) not in VALID_BF16_MFMA:
-            errors.append(f"WAVE=({k.W_M},{k.W_N},{k.W_K}) not in {VALID_BF16_MFMA}")
+        # -- MFMA validity --
+        valid_mfma = (
+            VALID_GFX942_BF16_MFMA
+            if getattr(k, "arch_prefix", "") == "gfx942"
+            else VALID_BF16_MFMA
+        )
+        if (k.W_M, k.W_N, k.W_K) not in valid_mfma:
+            errors.append(f"WAVE=({k.W_M},{k.W_N},{k.W_K}) not in {valid_mfma}")
         if WARP_SIZE % k.W_M != 0:
             errors.append(f"WARP_SIZE not divisible by W_M={k.W_M}")
         if WARP_SIZE % k.W_N != 0:
@@ -206,12 +284,12 @@ class opus_gemm_codegen:
         if k.W_N % k.T_N != 0:
             errors.append(f"W_N={k.W_N} not divisible by T_N={k.T_N}")
 
-        # ── VEC ──
+        # -- VEC --
         expected_vec = 16 // sizeof_da
         if k.VEC_A != expected_vec:
             errors.append(f"VEC_A={k.VEC_A} must be {expected_vec}")
 
-        # ── Block tile divisibility ──
+        # -- Block tile divisibility --
         if k.B_M % 2 != 0 or k.B_N % 2 != 0:
             errors.append(f"B_M={k.B_M}, B_N={k.B_N} must be even")
         if HALF_B_M % (k.W_M * k.T_M) != 0:
@@ -225,7 +303,7 @@ class opus_gemm_codegen:
         E_N = HALF_B_N // (k.W_N * k.T_N) if (k.W_N * k.T_N) else 0
         E_K = k.B_K // k.W_K if k.W_K else 0
 
-        # ── smem layout ──
+        # -- smem layout --
         if smem_linear_wave % k.B_K != 0:
             errors.append(f"smem_linear_wave={smem_linear_wave} not div by B_K={k.B_K}")
         else:
@@ -235,7 +313,7 @@ class opus_gemm_codegen:
             if HALF_B_N % smem_sub != 0:
                 errors.append(f"HALF_B_N={HALF_B_N} not div by smem_sub={smem_sub}")
 
-        # ── buffer/ds instruction counts ≥ 1 and integer ──
+        # -- buffer/ds instruction counts >= 1 and integer --
         for name, num, den in [
             ("a_buffer_load_insts", HALF_B_M * k.B_K, k.BLOCK_SIZE * k.VEC_A),
             ("b_buffer_load_insts", HALF_B_N * k.B_K, k.BLOCK_SIZE * k.VEC_B),
@@ -245,16 +323,19 @@ class opus_gemm_codegen:
             if den == 0 or num % den != 0 or num // den < 1:
                 errors.append(f"{name}={num}/{den} invalid")
 
-        # ── ra/rb: W_M*W_K / (WARP_SIZE*VEC_A) >= 1 ──
-        for tag, ww, vec in [
-            ("ra", k.W_M * k.W_K, k.VEC_A),
-            ("rb", k.W_N * k.W_K, k.VEC_B),
-        ]:
-            denom = WARP_SIZE * vec
-            if ww < denom or ww % denom != 0:
-                errors.append(f"{tag}: W*W_K={ww} must be >= and div by {denom}")
+        # -- ra/rb: W_M*W_K / (WARP_SIZE*VEC_A) >= 1 --
+        # gfx942's ra/rb layout reads via ds_read with a different stride
+        # so this >=1 check does not apply. Skip there.
+        if getattr(k, "arch_prefix", "") != "gfx942":
+            for tag, ww, vec in [
+                ("ra", k.W_M * k.W_K, k.VEC_A),
+                ("rb", k.W_N * k.W_K, k.VEC_B),
+            ]:
+                denom = WARP_SIZE * vec
+                if ww < denom or ww % denom != 0:
+                    errors.append(f"{tag}: W*W_K={ww} must be >= and div by {denom}")
 
-        # ── gb: exact division (not ceil_div) ──
+        # -- gb: exact division (not ceil_div) --
         if k.VEC_B and k.B_K % k.VEC_B == 0:
             threads_k_b = k.B_K // k.VEC_B
             if k.BLOCK_SIZE % threads_k_b == 0:
@@ -262,7 +343,7 @@ class opus_gemm_codegen:
                 if HALF_B_N % thr_n != 0:
                     errors.append(f"gb: HALF_B_N={HALF_B_N} not div by {thr_n}")
 
-        # ── sb: exact division ──
+        # -- sb: exact division --
         if smem_linear_wave % k.B_K == 0:
             smem_sub = smem_linear_wave // k.B_K
             if smem_sub and HALF_B_N % smem_sub == 0:
@@ -270,18 +351,18 @@ class opus_gemm_codegen:
                 if smem_n_rep % num_waves != 0:
                     errors.append(f"sb: smem_n_rep={smem_n_rep} not div by {num_waves}")
 
-        # ── threads_k <= WARP_SIZE ──
+        # -- threads_k <= WARP_SIZE --
         for tag, vec in [("ga", k.VEC_A), ("gb", k.VEC_B)]:
             if vec and k.B_K // vec > WARP_SIZE:
                 errors.append(f"{tag}: B_K/VEC={k.B_K // vec} > WARP_SIZE")
 
-        # ── AGPR < 256 ──
+        # -- AGPR < 256 --
         agpr_per_mfma = (k.W_M * k.W_N) // WARP_SIZE
         total_agprs = 4 * E_M * E_N * agpr_per_mfma
         if total_agprs >= 256:
             errors.append(f"AGPR={total_agprs} must be < 256")
 
-        # ── LDS <= 160 KiB ──
+        # -- LDS <= 160 KiB --
         if smem_linear_wave % k.B_K == 0:
             smem_sub = smem_linear_wave // k.B_K
             smem_m_rep = (
@@ -297,7 +378,7 @@ class opus_gemm_codegen:
             if total_lds > 160 * 1024:
                 errors.append(f"LDS={total_lds // 1024}KiB exceeds 160KiB")
 
-        # ── VGPR spill estimate ──
+        # -- VGPR spill estimate --
         vgpr_ops = 4 * E_K * (E_M + 2 * E_N)
         vgpr_est = vgpr_ops + 80
         if vgpr_est > 256:
@@ -305,17 +386,20 @@ class opus_gemm_codegen:
         if vgpr_est + total_agprs > 512:
             errors.append(f"VGPR+AGPR={vgpr_est + total_agprs} exceeds 512")
 
-        # ── ra/rb layout constraint: B_K must equal T_N * W_K / 2 ──
+        # -- ra/rb layout constraint: B_K must equal T_N * W_K / 2 --
         # The ra/rb LDS read layouts couple E_K with T_N through the T_M
         # partition stride in group 2. When (W_M/T_N) * E_K * 32 >= 512
         # (smem_linear_wave), the T_M partition offset exceeds the LDS row
         # data region. This limits valid configs to E_K = T_N / 2.
-        required_bk = k.T_N * k.W_K // 2
-        if k.B_K != required_bk:
-            errors.append(
-                f"B_K={k.B_K} must equal T_N*W_K/2={required_bk} "
-                f"(ra/rb layout E_K/T_N coupling)"
-            )
+        # gfx942 pipelines use a distinct ra/rb layout that does NOT carry
+        # this coupling, so skip the check there.
+        if getattr(k, "arch_prefix", "") != "gfx942":
+            required_bk = k.T_N * k.W_K // 2
+            if k.B_K != required_bk:
+                errors.append(
+                    f"B_K={k.B_K} must equal T_N*W_K/2={required_bk} "
+                    f"(ra/rb layout E_K/T_N coupling)"
+                )
 
         if errors:
             msg = f"Invalid a16w16 instance '{k.name}':\n" + "\n".join(
@@ -333,7 +417,7 @@ class opus_gemm_codegen:
             "min_k": 2 * k.B_K,
         }
 
-    # ── a16w16_flatmm validator ──
+    # -- a16w16_flatmm validator --
 
     @staticmethod
     def _validate_a16w16_flatmm(k: OpusGemmInstance):
@@ -346,7 +430,7 @@ class opus_gemm_codegen:
         errors = []
         sizeof_da = 2  # bf16 locked
 
-        # ── Locked config (traits enforces these via templates) ──
+        # -- Locked config (traits enforces these via templates) --
         if k.BLOCK_SIZE != 256:
             errors.append(f"BLOCK_SIZE={k.BLOCK_SIZE} must be 256 (4-wave warp-spec)")
         if k.T_M != 2:
@@ -354,7 +438,7 @@ class opus_gemm_codegen:
         if k.T_N != 1:
             errors.append(f"T_N={k.T_N} must be 1")
 
-        # ── MFMA: only W_M<32 path supported (LOAD_GROUP_M_LANE=1) ──
+        # -- MFMA: only W_M<32 path supported (LOAD_GROUP_M_LANE=1) --
         if (k.W_M, k.W_N, k.W_K) not in VALID_FLATMM_MFMA:
             errors.append(
                 f"WAVE=({k.W_M},{k.W_N},{k.W_K}) not in {VALID_FLATMM_MFMA} "
@@ -363,14 +447,14 @@ class opus_gemm_codegen:
         if k.W_M >= 32:
             errors.append(f"W_M={k.W_M}: flatmm LGML=4 path not implemented")
 
-        # ── VEC ──
+        # -- VEC --
         expected_vec = 16 // sizeof_da
         if k.VEC_A != expected_vec or k.VEC_B != expected_vec:
             errors.append(f"VEC_A={k.VEC_A}, VEC_B={k.VEC_B} must be {expected_vec}")
         if k.VEC_C != 4:
             errors.append(f"VEC_C={k.VEC_C} must be 4")
 
-        # ── Tile geometry (LOAD_GROUP_K = W_K * 2 = 64 for W_K=32) ──
+        # -- Tile geometry (LOAD_GROUP_K = W_K * 2 = 64 for W_K=32) --
         LOAD_GROUP_M = 64 if k.W_M >= 32 else 32
         LOAD_GROUP_N = 64 if k.W_N >= 32 else 32
         LOAD_GROUP_K = k.W_K * 2
@@ -385,18 +469,18 @@ class opus_gemm_codegen:
         num_load_groups_per_bn = k.B_N // LOAD_GROUP_N
         num_load_groups_per_bk = k.B_K // LOAD_GROUP_K
 
-        # ── LDS per-group-load size ──
+        # -- LDS per-group-load size --
         smem_linear_wave = WARP_SIZE * 16 // sizeof_da  # 512 for bf16
         smem_sub = smem_linear_wave // LOAD_GROUP_K
         slots = LOAD_GROUP_M // smem_sub
         smem_padding = 16 // sizeof_da if k.W_M >= 32 else 2 * 16 // sizeof_da
         smem_per_group_load_size = slots * (smem_linear_wave + smem_padding) * sizeof_da
 
-        # ── WG_PER_CU ──
+        # -- WG_PER_CU --
         if k.WG_PER_CU not in (1, 2):
             errors.append(f"WG_PER_CU={k.WG_PER_CU} must be 1 or 2")
 
-        # ── pfk derivation (match traits formula) ──
+        # -- pfk derivation (match traits formula) --
         lds_total = 163840  # gfx950 budget; host-side constant for validation only
         max_lds_per_wg = lds_total // max(k.WG_PER_CU, 1)
         per_block_iter = (
@@ -430,7 +514,7 @@ class opus_gemm_codegen:
             "groups_bk": num_load_groups_per_bk,
         }
 
-    # ── a16w16_flatmm_splitk validator ──
+    # -- a16w16_flatmm_splitk validator --
 
     @staticmethod
     def _validate_a16w16_flatmm_splitk(k: OpusGemmInstance):
@@ -560,7 +644,7 @@ class opus_gemm_codegen:
         # any are added in the future) keep working consistently.
         return opus_gemm_codegen._validate_a16w16(k)
 
-    # ── Instance generation ──
+    # -- Instance generation --
 
     def gen_instance(self, k: OpusGemmInstance):
         if k.kernel_tag == "a16w16":
@@ -595,13 +679,23 @@ class opus_gemm_codegen:
                 f"comrep=({info['com_rep_m']},{info['com_rep_n']}) "
                 f"LDS={info['lds_bytes'] // 1024}KiB K>={info['min_k']} WG={k.WG_PER_CU}"
             )
+        elif k.kernel_tag in ("a16w16_splitk", "a16w16_splitk_fused"):
+            # gfx942 splitk family shares the split-barrier per-tile shape
+            # validator; the splitk-specific kargs / launch logic is in
+            # the dedicated _gen_splitk_gfx942_* methods below.
+            info = self._validate_a16w16(k)
+            print(
+                f"  {k.name}: E=({info['E_M']},{info['E_N']},{info['E_K']})"
+                f"  VGPR~{info['vgpr_est']}  AGPR={info['agprs']}"
+                f"  LDS={info['lds_bytes'] // 1024}KiB"
+            )
 
-        pipeline_header = PIPELINE_HEADER_MAP[k.kernel_tag]
-        traits_header = TRAITS_HEADER_MAP[k.kernel_tag]
+        pipeline_header = _lookup(k, PIPELINE_HEADER_MAP, GFX942_PIPELINE_HEADER_MAP)
+        traits_header = _lookup(k, TRAITS_HEADER_MAP, GFX942_TRAITS_HEADER_MAP)
         kernel_func = KERNEL_FUNC_MAP[k.kernel_tag]
         da, db = INPUT_DTYPE_MAP[k.kernel_tag]
-        traits_name = TRAITS_NAME_MAP[k.kernel_tag]
-        kargs_name = KARGS_NAME_MAP[k.kernel_tag]
+        traits_name = _lookup(k, TRAITS_NAME_MAP, GFX942_TRAITS_NAME_MAP)
+        kargs_name = _lookup(k, KARGS_NAME_MAP, GFX942_KARGS_NAME_MAP)
 
         # Track per-kid pipeline header so the per-kid device.cu can
         # include exactly the right one without re-running the full
@@ -640,6 +734,30 @@ class opus_gemm_codegen:
                 db,
                 traits_name,
                 kargs_name,
+            )
+        elif k.kernel_tag == "a16w16_splitk":
+            self._gen_splitk_gfx942_instance(
+                k,
+                pipeline_header,
+                traits_header,
+                kernel_func,
+                da,
+                db,
+                traits_name,
+                kargs_name,
+                fused=False,
+            )
+        elif k.kernel_tag == "a16w16_splitk_fused":
+            self._gen_splitk_gfx942_instance(
+                k,
+                pipeline_header,
+                traits_header,
+                kernel_func,
+                da,
+                db,
+                traits_name,
+                kargs_name,
+                fused=True,
             )
         elif k.kernel_tag in NOSCALE_TAGS:
             self._gen_noscale_instance(
@@ -902,9 +1020,15 @@ void
         # buffer_loads -- a null rsrc would generate out-of-bounds garbage
         # that the if constexpr guard cannot screen.
         has_oob_str = "true" if k.has_oob else "false"
+        # gfx942's opus_gemm_a16w16_traits template has 8 params (no HAS_OOB,
+        # no CACHECTL_A/B); gfx950's gfx950 traits adds those as trailing
+        # template params. Suppress the trailing ", {has_oob_str}{cachectl}"
+        # when emitting gfx942 traits.
+        is_gfx942 = getattr(k, "arch_prefix", "") == "gfx942"
+        traits_tail_for_split_barrier = "" if is_gfx942 else f",\n        {has_oob_str}"
         if is_a16w16_split_barrier:
             cachectl_launch_extra = ""
-            if hasattr(k, "cachectl_a") and k.cachectl_a >= 0:
+            if (not is_gfx942) and hasattr(k, "cachectl_a") and k.cachectl_a >= 0:
                 cachectl_launch_extra = f",\n        {k.cachectl_a}, {k.cachectl_b}"
             launch_block = f"""
     using TraitsNoBias = {traits_name}<{k.BLOCK_SIZE},
@@ -912,15 +1036,13 @@ void
         opus::tuple<{da}, {db}, D_C, fp32_t>,
         opus::seq<{k.VEC_A}, {k.VEC_B}, {k.VEC_C}>{traits_extra},
         false,                                 // HAS_BIAS
-        D_C,                                   // D_BIAS = D_C
-        {has_oob_str}{cachectl_launch_extra}>;
+        D_C{traits_tail_for_split_barrier}{cachectl_launch_extra}>;
     using TraitsBias = {traits_name}<{k.BLOCK_SIZE},
         opus::seq<{k.B_M}, {k.B_N}, {k.B_K}>,
         opus::tuple<{da}, {db}, D_C, fp32_t>,
         opus::seq<{k.VEC_A}, {k.VEC_B}, {k.VEC_C}>{traits_extra},
         true,                                  // HAS_BIAS
-        D_C,                                   // D_BIAS = D_C
-        {has_oob_str}{cachectl_launch_extra}>;
+        D_C{traits_tail_for_split_barrier}{cachectl_launch_extra}>;
 
     auto stream = aiter::getCurrentHIPStream();
     if (bias.has_value()) {{{{
@@ -964,7 +1086,7 @@ void
         # nullptr / 0 assignments.
         kargs_init_extra = ""
 
-        # ── Compile-time split: host pass vs device pass ──
+        # -- Compile-time split: host pass vs device pass --
         #
         # The .cuh file contains the heavy host-side launcher (AITER_CHECK,
         # `<<<...>>>` launch, kargs marshalling). Wrapping the host includes
@@ -990,10 +1112,17 @@ void
         # without repeating the long template argument list.
         # a16w16 split-barrier emits two Traits (HAS_BIAS true / false);
         # everything else has a single Traits.
-        # CPOL template params (only for a16w16 split-barrier)
+        # CPOL template params (only for a16w16 split-barrier on gfx950;
+        # gfx942's traits has no CACHECTL_* params).
         cachectl_extra = ""
-        if is_a16w16_split_barrier and (hasattr(k, "cachectl_a") and k.cachectl_a >= 0):
+        if (
+            is_a16w16_split_barrier
+            and (not is_gfx942)
+            and (hasattr(k, "cachectl_a") and k.cachectl_a >= 0)
+        ):
             cachectl_extra = f",\n    {k.cachectl_a}, {k.cachectl_b}"
+        # gfx942 traits omits the trailing HAS_OOB template param.
+        traits_alias_tail = "" if is_gfx942 else f",\n    {has_oob_str}"
         if is_a16w16_split_barrier:
             traits_aliases = f"""
 template <typename D_C>
@@ -1002,16 +1131,14 @@ using {k.name}_TraitsNoBias = {traits_name}<{k.BLOCK_SIZE},
     opus::tuple<{da}, {db}, D_C, fp32_t>,
     opus::seq<{k.VEC_A}, {k.VEC_B}, {k.VEC_C}>{traits_extra},
     false,
-    D_C,
-    {has_oob_str}{cachectl_extra}>;
+    D_C{traits_alias_tail}{cachectl_extra}>;
 template <typename D_C>
 using {k.name}_TraitsBias = {traits_name}<{k.BLOCK_SIZE},
     opus::seq<{k.B_M}, {k.B_N}, {k.B_K}>,
     opus::tuple<{da}, {db}, D_C, fp32_t>,
     opus::seq<{k.VEC_A}, {k.VEC_B}, {k.VEC_C}>{traits_extra},
     true,
-    D_C,
-    {has_oob_str}{cachectl_extra}>;
+    D_C{traits_alias_tail}{cachectl_extra}>;
 """
         else:
             traits_aliases = f"""
@@ -1390,7 +1517,7 @@ void
         has_bias_str = "true" if False else "false"  # HAS_BIAS hardcoded false
 
         # Kid-specific runtime K-bound check per INTEGRATION.md "Runtime
-        # 前置约束" item 1: K >= Traits::prefetch_k_iter * Traits::B_K.
+        # ????" item 1: K >= Traits::prefetch_k_iter * Traits::B_K.
         # pfk is a compile-time member so the effective bound is inlined.
         k_check = f"""
     int loops_ = (K + {k.B_K} - 1) / {k.B_K};
@@ -1797,7 +1924,7 @@ void
         # Now they live in a single dedicated TU emitted by
         # _emit_splitk_reduce_tu, so each splitk kid's device.cu only
         # carries its own main-kernel instantiation. See
-        # aiter/ops/opus/README.md §7.6 for the wall-time impact.
+        # aiter/ops/opus/README.md ?7.6 for the wall-time impact.
         for CDtype in k.output_dtypes:
             host_decl = (
                 f"template void\n"
@@ -1819,7 +1946,374 @@ void
                 {"kid_name": k.name, "dtype": CDtype, "device_decl": device_decl}
             )
 
-    # ── Lookup / manifest generation ──
+    def _gen_splitk_gfx942_instance(
+        self,
+        k,
+        pipeline_header,
+        traits_header,
+        kernel_func,
+        da,
+        db,
+        traits_name,
+        kargs_name,
+        fused,
+    ):
+        """Generate a gfx942 a16w16 split-K launcher.
+
+        Two flavors:
+          * fused=False (a16w16_splitk):       main kernel writes a fp32 workspace;
+                                              host launches splitk_reduce_kernel
+                                              afterwards to cast / sum into Y.
+          * fused=True  (a16w16_splitk_fused): main kernel performs the reduce
+                                              via per-tile atomic flags and
+                                              writes the final Y directly. No
+                                              separate reduce launch.
+
+        Shared infra:
+          * fp32 workspace cached in a static thread_local pointer (HIP
+            graph-capture compatible after one warmup call).
+          * Host-side split_k auto-clamp to keep every split with >= 2
+            B_K iterations (matches the kernel's min-loop assumption).
+        """
+        # gfx942 a16w16_traits takes 8 template params:
+        #   <BLOCK_SIZE, BLOCK, DTYPE, VEC, TILE, WAVE, HAS_BIAS=false, D_BIAS>
+        # We always emit HAS_BIAS=false / D_BIAS=fp32_t for splitk kids;
+        # bias is reserved for future fusion but not consumed yet.
+        traits_aliases = f"""
+template <typename D_C>
+using {k.name}_Traits = {traits_name}<{k.BLOCK_SIZE},
+    opus::seq<{k.B_M}, {k.B_N}, {k.B_K}>,
+    opus::tuple<{da}, {db}, fp32_t, fp32_t>,
+    opus::seq<{k.VEC_A}, {k.VEC_B}, {k.VEC_C}>,
+    opus::seq<{k.T_M}, {k.T_N}, 1>,
+    opus::seq<{k.W_M}, {k.W_N}, {k.W_K}>,
+    false,
+    fp32_t>;
+"""
+
+        # Per-flavor pieces.
+        #
+        # kargs_struct_decl: the splitk / splitk_fused kargs structs live
+        # inside their pipeline headers (not the shared traits header), so
+        # the fused HOST TU branch -- which only includes the traits header --
+        # cannot see them. Inline a struct definition (guarded by the same
+        # OPUS_GEMM_*_KARGS_GFX942_DEFINED macro as the pipeline header) so
+        # the forward decl of the kernel template type-checks. The pipeline
+        # header's own definition is suppressed by the include guard on the
+        # device-pass / non-fused path.
+        if fused:
+            err_label = "a16w16_splitk_fused"
+            kargs_struct_decl = """
+#ifndef OPUS_GEMM_SPLITK_FUSED_KARGS_GFX942_DEFINED
+#define OPUS_GEMM_SPLITK_FUSED_KARGS_GFX942_DEFINED
+struct opus_gemm_splitk_fused_kargs {
+    const void* __restrict__ ptr_a;
+    const void* __restrict__ ptr_b;
+    void*       __restrict__ ptr_workspace;
+    void*       __restrict__ ptr_c;
+    const void* __restrict__ ptr_bias;
+    unsigned int* __restrict__ ptr_flags;
+    int m, n, k, batch, split_k;
+    int stride_a, stride_b, stride_ws, stride_c;
+    int stride_a_batch, stride_b_batch, stride_ws_batch, stride_c_batch;
+    int stride_bias_batch;
+};
+#endif
+"""
+            ws_alloc_extra = """
+    int num_flags = batch * num_tiles_m * num_tiles_n;
+    size_t total_bytes = ws_bytes + (size_t)num_flags * sizeof(unsigned int);"""
+            ws_size_var = "total_bytes"
+            flags_block = """
+    unsigned int* ptr_flags_ = reinterpret_cast<unsigned int*>(
+        static_cast<char*>(ws_cached_ptr) + ws_bytes);
+    HIP_CALL(hipMemsetAsync(ptr_flags_, 0, num_flags * sizeof(unsigned int), stream));"""
+            kargs_flags_assign = "    kargs.ptr_flags     = ptr_flags_;\n"
+            # fused kernel templates on D_OUT too; launcher dispatches on Y.dtype()
+            # so the in-kernel reduce casts the fp32 partials to the right Y type.
+            # Hardcoded bf16 would write half-width bytes into an fp32 Y buffer
+            # and produce garbage output (the original bug).
+            kernel_fwd_decl = (
+                f"template<typename Traits, typename D_OUT>\n"
+                f"__global__ void {kernel_func}({kargs_name} kargs);"
+            )
+            kernel_launch_body = f"""
+    if (Y.dtype() == AITER_DTYPE_bf16) {{{{
+        {kernel_func}<{k.name}_Traits<D_C>, __bf16><<<grid_main, block_main, 0, stream>>>(kargs);
+    }}}} else {{{{
+        {kernel_func}<{k.name}_Traits<D_C>, float><<<grid_main, block_main, 0, stream>>>(kargs);
+    }}}}"""
+            reduce_launch = ""  # in-kernel reduce; no separate launch
+        else:
+            err_label = "a16w16_splitk"
+            kargs_struct_decl = """
+#ifndef OPUS_GEMM_SPLITK_KARGS_GFX942_DEFINED
+#define OPUS_GEMM_SPLITK_KARGS_GFX942_DEFINED
+struct opus_gemm_splitk_kargs {
+    const void* __restrict__ ptr_a;
+    const void* __restrict__ ptr_b;
+    void*       __restrict__ ptr_workspace;
+    void*       __restrict__ ptr_c;
+    const void* __restrict__ ptr_bias;
+    int m, n, k, batch, split_k;
+    int stride_a, stride_b, stride_ws, stride_c;
+    int stride_a_batch, stride_b_batch, stride_ws_batch, stride_c_batch;
+    int stride_bias_batch;
+};
+#endif
+"""
+            ws_alloc_extra = ""
+            ws_size_var = "ws_bytes"
+            flags_block = ""
+            kargs_flags_assign = ""
+            # non-fused splitk: single-template kernel (D_C only), launch once.
+            # Y-dtype dispatch happens inside the separate reduce kernel below.
+            kernel_fwd_decl = (
+                f"template<typename Traits>\n"
+                f"__global__ void {kernel_func}({kargs_name} kargs);"
+            )
+            kernel_launch_body = (
+                f"\n    {kernel_func}<{k.name}_Traits<D_C>>"
+                f"<<<grid_main, block_main, 0, stream>>>(kargs);"
+            )
+            # gfx942 splitk uses the same shared splitk_reduce_kernel
+            # template (lives in gfx942/splitk_reduce_gfx942.cuh); the
+            # template signature is identical to gfx950's, so the launch
+            # body is identical too.
+            reduce_launch = """
+    constexpr int REDUCE_VEC = 16;
+    constexpr int REDUCE_BS  = 64;
+    dim3 grid_reduce((N + REDUCE_VEC * REDUCE_BS - 1) / (REDUCE_VEC * REDUCE_BS),
+                      batch * M, 1);
+    dim3 block_reduce(REDUCE_BS);
+
+    if (Y.dtype() == AITER_DTYPE_bf16) {{
+        if (bias.has_value()) {{
+            splitk_reduce_kernel<REDUCE_VEC, REDUCE_BS, __bf16, true, __bf16, true>
+                <<<grid_reduce, block_reduce, 0, stream>>>(
+                    reinterpret_cast<const float*>(ptr_workspace_),
+                    reinterpret_cast<__bf16*>(Y.data_ptr()),
+                    split_k, M, N, batch, padded_M, padded_N,
+                    reinterpret_cast<const __bf16*>(ptr_bias_),
+                    stride_bias_batch_);
+        }} else {{
+            splitk_reduce_kernel<REDUCE_VEC, REDUCE_BS, __bf16, false, __bf16, true>
+                <<<grid_reduce, block_reduce, 0, stream>>>(
+                    reinterpret_cast<const float*>(ptr_workspace_),
+                    reinterpret_cast<__bf16*>(Y.data_ptr()),
+                    split_k, M, N, batch, padded_M, padded_N,
+                    nullptr, 0);
+        }}
+    }} else {{
+        if (bias.has_value()) {{
+            splitk_reduce_kernel<REDUCE_VEC, REDUCE_BS, float, true, float, true>
+                <<<grid_reduce, block_reduce, 0, stream>>>(
+                    reinterpret_cast<const float*>(ptr_workspace_),
+                    reinterpret_cast<float*>(Y.data_ptr()),
+                    split_k, M, N, batch, padded_M, padded_N,
+                    reinterpret_cast<const float*>(ptr_bias_),
+                    stride_bias_batch_);
+        }} else {{
+            splitk_reduce_kernel<REDUCE_VEC, REDUCE_BS, float, false, float, true>
+                <<<grid_reduce, block_reduce, 0, stream>>>(
+                    reinterpret_cast<const float*>(ptr_workspace_),
+                    reinterpret_cast<float*>(Y.data_ptr()),
+                    split_k, M, N, batch, padded_M, padded_N,
+                    nullptr, 0);
+        }}
+    }}"""
+
+        INSTANCE_IMPL = f"""// SPDX-License-Identifier: MIT
+// Copyright (C) 2025-2026, Advanced Micro Devices, Inc. All rights reserved.
+#pragma once
+#if !defined(__HIP_DEVICE_COMPILE__) && !defined(__HIPCC_RTC__)
+#include "aiter_tensor.h"
+#include "aiter_stream.h"
+#include <optional>
+#endif
+#ifdef OPUS_FUSED_HOST_TU
+#include "{traits_header}"
+{kargs_struct_decl}{kernel_fwd_decl}
+#else
+#include "{pipeline_header}"
+#endif
+{traits_aliases}
+#if !defined(__HIP_DEVICE_COMPILE__) && !defined(__HIPCC_RTC__)
+template <typename D_C>
+void
+{k.name}(
+    aiter_tensor_t &XQ,
+    aiter_tensor_t &WQ,
+    aiter_tensor_t &Y,
+    std::optional<aiter_tensor_t> bias,
+    int splitK)
+{{{{
+    static_assert(std::is_same<D_C, fp32_t>::value,
+        "{err_label} main kernel uses fp32 workspace; D_C template param must be fp32_t");
+
+    int batch = XQ.size(0);
+    int M = XQ.size(1);
+    int N = WQ.size(1);
+    int K = XQ.size(2);
+
+    AITER_CHECK(Y.dtype() == AITER_DTYPE_bf16
+                || Y.dtype() == AITER_DTYPE_fp32,
+        "{err_label} requires Y dtype bf16 or fp32");
+    AITER_CHECK(M >= 1 && N >= 1 && K >= 1 && batch >= 1,
+        "M, N, K, batch must be >= 1");
+    AITER_CHECK(K % 2 == 0,
+        "K=", K, " must be even (a16w16 family rejects odd K due to a "
+        "latent K-tail accumulation bug; pass an even K)");
+    // The gfx942 a16w16 splitk pipeline does not yet implement mask_va_tail
+    // (the per-lane K-tail zeroing that gfx950's flatmm_splitk uses). When
+    // K is not a multiple of B_K the last K-tile's buffer_load wraps past
+    // the row into the next M-row's data, corrupting the accumulator
+    // (observed max|err|~44 on bf16). Reject K%B_K!=0 until the
+    // mask_va_tail port lands; callers must pad K to a multiple of B_K.
+    AITER_CHECK(K % {k.B_K} == 0,
+        "K=", K, " must be a multiple of B_K={k.B_K} for {err_label} "
+        "(K-tail masking not yet implemented on gfx942 splitk)");
+{self.BIAS_HOST_VALIDATE}
+    using Traits = {k.name}_Traits<D_C>;
+
+    // splitK semantics for gfx942 splitk launchers:
+    //   splitK >  1 -> caller-pinned (tuner / explicit override). Used verbatim
+    //                  (subject to the iters-per-split auto-clamp below).
+    //   splitK <= 0 -> caller wants the launcher to auto-pick. Production
+    //                  dispatcher (opus_gemm.cu) takes this path so the call
+    //                  site stays gfx950-style (`fn(..., 0)`) without
+    //                  arch-aware splitK plumbing leaking up.
+    //   splitK == 1 -> caller explicitly requested no K-split. Honored.
+    int split_k;
+    if (splitK > 0) {{{{
+        split_k = splitK;
+    }}}} else {{{{
+        // Auto-pick: target ~1 WG per CU. cu_num cached thread_local so we
+        // do not pay hipGetDeviceProperties on every launch.
+        static thread_local int cu_cached = -1;
+        if (cu_cached < 0) {{{{
+            int dev = 0;
+            hipDeviceProp_t prop{{{{}}}};
+            if (hipGetDevice(&dev) == hipSuccess &&
+                hipGetDeviceProperties(&prop, dev) == hipSuccess) {{{{
+                cu_cached = prop.multiProcessorCount;
+            }}}}
+            if (cu_cached <= 0) cu_cached = 64;  // safe gfx942 lower bound
+        }}}}
+        int tiles_mn = ((M + {k.B_M} - 1) / {k.B_M})
+                     * ((N + {k.B_N} - 1) / {k.B_N}) * batch;
+        if (tiles_mn <= 0) tiles_mn = 1;
+        split_k = (cu_cached + tiles_mn - 1) / tiles_mn;
+        if (split_k < 1)  split_k = 1;
+        if (split_k > 16) split_k = 16;  // matches tuner enumeration ceiling
+    }}}}
+
+    // Host-side auto-clamp: split-barrier pipeline requires at least 2
+    // K-tile iterations per split (one in LDS + one prefetched). Applies to
+    // both caller-pinned and auto-picked split_k.
+    int total_iters = (K + {k.B_K} - 1) / {k.B_K};
+    constexpr int min_iters_per_split = 2;
+    while (split_k > 1) {{{{
+        int iters_full = (total_iters + split_k - 1) / split_k;
+        int last_loops = total_iters - (split_k - 1) * iters_full;
+        if (iters_full >= min_iters_per_split && last_loops >= min_iters_per_split) break;
+        split_k--;
+    }}}}
+    AITER_CHECK(total_iters >= min_iters_per_split,
+        "K=", K, " too small for {err_label} B_K={k.B_K}: need K >= ",
+        {k.B_K} * min_iters_per_split);
+
+    int num_tiles_m = (M + {k.B_M} - 1) / {k.B_M};
+    int num_tiles_n = (N + {k.B_N} - 1) / {k.B_N};
+    int padded_M    = num_tiles_m * {k.B_M};
+    int padded_N    = num_tiles_n * {k.B_N};
+
+    auto stream = aiter::getCurrentHIPStream();
+    size_t ws_bytes = (size_t)split_k * (size_t)batch
+                    * (size_t)padded_M * (size_t)padded_N * sizeof(float);{ws_alloc_extra}
+    static thread_local void*  ws_cached_ptr   = nullptr;
+    static thread_local size_t ws_cached_bytes = 0;
+    if (ws_cached_ptr == nullptr || {ws_size_var} > ws_cached_bytes)
+    {{
+        hipStreamCaptureStatus capture_status = hipStreamCaptureStatusNone;
+        HIP_CALL(hipStreamIsCapturing(stream, &capture_status));
+        AITER_CHECK(capture_status == hipStreamCaptureStatusNone,
+            "{err_label} workspace cache miss inside HIP graph capture is not "
+            "supported. Run the launcher once eagerly with the same shape "
+            "before capturing the graph.");
+
+        if (ws_cached_ptr != nullptr)
+        {{
+            HIP_CALL(hipDeviceSynchronize());
+            HIP_CALL(hipFree(ws_cached_ptr));
+        }}
+        const size_t kGrowAlign = (size_t)4 * 1024 * 1024;
+        size_t grow_bytes = (({ws_size_var} + kGrowAlign - 1) / kGrowAlign) * kGrowAlign;
+        HIP_CALL(hipMalloc(&ws_cached_ptr, grow_bytes));
+        ws_cached_bytes = grow_bytes;
+    }}
+    void* ptr_workspace_ = ws_cached_ptr;{flags_block}
+
+    {kargs_name} kargs{{{{}}}};
+    kargs.ptr_a         = XQ.data_ptr();
+    kargs.ptr_b         = WQ.data_ptr();
+    kargs.ptr_workspace = ptr_workspace_;
+    kargs.ptr_c         = Y.data_ptr();
+    kargs.ptr_bias      = ptr_bias_;
+{kargs_flags_assign}    kargs.m = M; kargs.n = N; kargs.k = K; kargs.batch = batch;
+    kargs.split_k = split_k;
+    kargs.stride_a        = K;
+    kargs.stride_b        = K;
+    kargs.stride_ws       = padded_N;
+    kargs.stride_c        = N;
+    kargs.stride_a_batch  = M * K;
+    kargs.stride_b_batch  = N * K;
+    kargs.stride_ws_batch = padded_M * padded_N;
+    kargs.stride_c_batch  = M * N;
+    kargs.stride_bias_batch = stride_bias_batch_;
+
+    dim3 grid_main(num_tiles_m * num_tiles_n * split_k, 1, batch);
+    dim3 block_main({k.BLOCK_SIZE});
+
+{kernel_launch_body}{reduce_launch}
+}}}}
+#endif // launcher only on regular host pass
+"""
+        Path(os.path.join(self.impl_path, f"{k.name}.cuh")).write_text(INSTANCE_IMPL)
+
+        for CDtype in k.output_dtypes:
+            host_decl = (
+                f"template void\n"
+                f"{k.name}<{CDtype}>(\n"
+                f"    aiter_tensor_t &XQ,\n"
+                f"    aiter_tensor_t &WQ,\n"
+                f"    aiter_tensor_t &Y,\n"
+                f"    std::optional<aiter_tensor_t>,\n"
+                f"    int);\n"
+            )
+            if fused:
+                # fused kernel has Y-dtype as a second template param; emit
+                # one device instantiation per supported Y dtype (bf16, float)
+                # so both branches of the launcher's runtime dispatch link.
+                device_decl = (
+                    f"template __global__ void {kernel_func}<\n"
+                    f"    {k.name}_Traits<{CDtype}>, __bf16>({kargs_name});\n"
+                    f"template __global__ void {kernel_func}<\n"
+                    f"    {k.name}_Traits<{CDtype}>, float>({kargs_name});\n"
+                )
+            else:
+                device_decl = (
+                    f"template __global__ void {kernel_func}<\n"
+                    f"    {k.name}_Traits<{CDtype}>>({kargs_name});\n"
+                )
+            self._host_instantiations.append(
+                {"kid_name": k.name, "dtype": CDtype, "host_decl": host_decl}
+            )
+            self._device_instantiations.append(
+                {"kid_name": k.name, "dtype": CDtype, "device_decl": device_decl}
+            )
+
+    # -- Lookup / manifest generation --
 
     def gen_lookup_dict(self, kernels_dict):
         """Emit opus_gemm_lookup.h with two (M,N,K)->kernel macros.
@@ -1929,7 +2423,7 @@ void
                     row_outdtype = str(mnk[3])
                     if target_outdtype is not None and row_outdtype != target_outdtype:
                         continue
-                is_splitk = k.kernel_tag == "a16w16_flatmm_splitk"
+                is_splitk = k.kernel_tag in SPLITK_TAGS
                 if not is_splitk and ctype not in k.output_dtypes:
                     continue
                 rows.append((int(mnk[0]), int(mnk[1]), int(mnk[2]), k.name, is_splitk))
@@ -2076,15 +2570,15 @@ void
                 else:
                     f.write(MANIFEST_SCALE.format(kernel_name=k.name))
 
-    # ── Per-pass TU emission ──
+    # -- Per-pass TU emission --
     #
     # Replaces the old "one .cpp per (kid, dtype)" scheme. The wall-time
     # math:
     #   Old: 38 .cpp TUs each pay full <torch/extension.h> + <hip/...>
     #        parse on host pass (~13s) + a small device pass (~2s, after
-    #        the .cuh #ifndef split). Total parallel wall ≈ host pass.
+    #        the .cuh #ifndef split). Total parallel wall ? host pass.
     #   New: 1 fused host TU does the heavy host parse exactly once
-    #        (~13s) + N device TUs each ~2s. Parallel wall ≈ max(13s,
+    #        (~13s) + N device TUs each ~2s. Parallel wall ? max(13s,
     #        slowest device TU). The 38 host parses collapse into one,
     #        so the critical path shrinks to roughly the single host
     #        TU's compile time.
@@ -2228,12 +2722,23 @@ void
             (the host stubs the fused TU emits are linked against this
             single TU's GPU code, not against per-splitk-TU copies).
 
-        The reduce kernel template lives in splitk_reduce_gfx950.cuh,
-        included transitively here via the splitk pipeline header so we
-        get the same definition the splitk kids saw before. There's no
-        need to gate via OPUS_FUSED_HOST_TU because no launcher body or
-        traits structure is being pulled in.
+        The reduce kernel template lives in splitk_reduce_{arch}.cuh,
+        with one header per arch. Both headers define the same
+        `splitk_reduce_kernel` template (arch-guarded internally), so the
+        TU only ever includes one. We pick the gfx942 header when at
+        least one gfx942 splitk kid is in the build; otherwise we fall
+        back to the gfx950 header (legacy default).
         """
+        has_gfx942_splitk = any(
+            ("opus_gemm_gfx942_splitk_" in row["kid_name"])
+            and ("splitk_fused" not in row["kid_name"])
+            for row in self._device_instantiations
+        )
+        reduce_header = (
+            "gfx942/splitk_reduce_gfx942.cuh"
+            if has_gfx942_splitk
+            else "gfx950/splitk_reduce_gfx950.cuh"
+        )
         contents = (
             "// SPDX-License-Identifier: MIT\n"
             "// Copyright (C) 2025-2026, Advanced Micro Devices, Inc. All rights reserved.\n"
@@ -2245,7 +2750,7 @@ void
             "// Carved out of every splitk kid's device.cu so the reduce\n"
             "// kernels only get RA'd / ISA-emitted once. Compiled with\n"
             "// -D__HIPCC_RTC__ so the host pass is minimal.\n"
-            '#include "gfx950/splitk_reduce_gfx950.cuh"\n'
+            f'#include "{reduce_header}"\n'
             "// HAS_OOB=true variants\n"
             "template __global__ void splitk_reduce_kernel<16, 64, __bf16, true,  __bf16, true>(\n"
             "    const float*, __bf16*, int, int, int, int, int, int,\n"
@@ -2303,9 +2808,17 @@ void
         # any reduce symbol and the linker would warn about an unused
         # weak object). Probed by checking any device instantiation
         # whose kernel function name is the splitk one.
-        if any(
-            "flatmm_splitk" in row["kid_name"] for row in self._device_instantiations
-        ):
+        # The standalone reduce TU is needed only when at least one kid
+        # in the build uses the independent-reduce splitk launcher
+        # (gfx950 flatmm_splitk or gfx942 a16w16_splitk). gfx942's
+        # a16w16_splitk_fused performs the reduce in-kernel, so it
+        # alone does not require the reduce TU.
+        needs_reduce_tu = any(
+            ("flatmm_splitk" in row["kid_name"])
+            or ("_splitk_" in row["kid_name"] and "splitk_fused" not in row["kid_name"])
+            for row in self._device_instantiations
+        )
+        if needs_reduce_tu:
             self._emit_splitk_reduce_tu()
 
         self.gen_lookup_dict(kernels_dict)
@@ -2440,11 +2953,18 @@ if __name__ == "__main__":
         "a16w16": a16w16_kernels_list,
         "a16w16_flatmm": a16w16_flatmm_kernels_list,
         "a16w16_flatmm_splitk": a16w16_flatmm_splitk_kernels_list,
+        # gfx942 family lives in its own kid range (50000+); honor
+        # --kernel_tag for these too. The base "a16w16" entry above
+        # is gfx950-only (a16w16_kernels_list); use the gfx942-prefixed
+        # tags to scope a developer codegen to gfx942.
+        "gfx942_a16w16": gfx942_a16w16_kernels_list,
+        "gfx942_a16w16_splitk": gfx942_a16w16_splitk_kernels_list,
+        "gfx942_a16w16_splitk_fused": gfx942_a16w16_splitk_fused_kernels_list,
     }
 
     # --- Compute the subset-compile set S ------------------------------------
     #
-    # S = (CSV opus rows' kids) ∪ (previous sidecar contents) ∪ HEURISTIC_DEFAULT_KIDS
+    # S = (CSV opus rows' kids) ? (previous sidecar contents) ? HEURISTIC_DEFAULT_KIDS
     # Intersected with kernels_list.keys() to guard against stale kids in CSV.
     #
     # When --kernel_tag is specified, we honor that filter as a developer
@@ -2507,9 +3027,54 @@ if __name__ == "__main__":
     valid_kids = set(kernels_list.keys())
     S = (csv_kids | sidecar_kids | set(HEURISTIC_DEFAULT_KIDS)) & valid_kids
 
-    # Always keep a8w8 family (kid 1, 2) in the build -- they are not part
-    # of the a16w16-family subset-compile contract but the module_deepgemm_opus
-    # .so historically exposes them via opus_gemm() for fp8 paths.
+    # --- Per-arch filter ------------------------------------------------------
+    # Drop kids whose arch_prefix is not in the target build set. Without
+    # this, a stale sidecar from a gfx950 host pulls 50+ gfx950 kids into
+    # the gfx942 build, which (a) wastes minutes of compile time on stubs
+    # that the gfx942 device pass renders empty anyway, and (b) leaves the
+    # gfx942 tune_lookup tables populated with kids that resolve to those
+    # empty bodies -- so any tuner sweep that enumerates the build's kid
+    # list runs `Kernel id X not found in a16w16 bf16 tune lookup table
+    # (gfx942)` because the per-arch lookup macro only emits entries for
+    # kids whose arch matches. GPU_ARCHS is the source of truth (matches
+    # how the rest of aiter selects build targets).
+    def _kid_arch(k):
+        # arch_prefix is "" for the legacy gfx950 kid families.
+        return (getattr(k, "arch_prefix", "") or "gfx950").lower()
+
+    target_arches = None
+    gpu_archs_env = os.getenv("GPU_ARCHS", "native").strip()
+    explicit = [
+        a.strip().lower()
+        for a in gpu_archs_env.split(";")
+        if a.strip() and a.strip().lower() != "native"
+    ]
+    if explicit:
+        target_arches = set(explicit)
+    else:
+        # GPU_ARCHS=native (or unset): probe live GPU. If rocminfo isn't
+        # available (build-only host), skip the filter and bake everything
+        # so the resulting wheel stays multi-arch usable.
+        try:
+            from aiter.jit.utils.chip_info import get_gfx_runtime
+            target_arches = {get_gfx_runtime().lower()}
+        except Exception:
+            target_arches = None
+
+    if target_arches is not None:
+        before = len(S)
+        S = {kid for kid in S if _kid_arch(kernels_list[kid]) in target_arches}
+        dropped = before - len(S)
+        print(
+            f"[opus gen_instances] arch filter: target={sorted(target_arches)} "
+            f"dropped {dropped} off-arch kids from |S|"
+        )
+
+    # a8w8 family (kid 1, 2) is referenced unconditionally by
+    # default_kernels_dict[-1] / [-2] in opus_gemm.cu's dispatcher, so the
+    # symbols must exist in every build regardless of target arch. On
+    # gfx942 the kernel body is gated behind `#if defined(__gfx950__)` so
+    # the device pass produces an empty stub and the .so still links.
     S |= set(a8w8_scale_kernels_list.keys())
     S |= set(a8w8_kernels_list.keys())
 
@@ -2529,7 +3094,12 @@ if __name__ == "__main__":
     # If this fires, opus_a16w16_heuristic_kid_gfx950() in
     # opus_gemm_heuristic_dispatch_gfx950.cuh would return a kid that the
     # tune_lookup table cannot resolve -- a runtime AITER_CHECK failure.
-    missing_heuristic = set(HEURISTIC_DEFAULT_KIDS) - S
+    # When the build is filtered to a single arch (above), only check the
+    # heuristic kids for that arch -- otherwise the cross-arch heuristic
+    # kids (e.g. gfx950's 200/206/208 on a gfx942 build) would falsely
+    # trigger the assert.
+    required_heuristic = set(heuristic_kids_for_arch(target_arches))
+    missing_heuristic = required_heuristic - S
     assert not missing_heuristic, (
         f"Subset-compile error: heuristic-fallback kids "
         f"{sorted(missing_heuristic)} are missing from the compile set S; "
@@ -2588,7 +3158,7 @@ if __name__ == "__main__":
                     # Find the kid for this entry by reverse-lookup against S.
                     # Easier: just keep the entry; the launcher symbol is
                     # only resolvable if v.name's kid is in S, which we've
-                    # already guaranteed via valid_kids ∩ S.
+                    # already guaranteed via valid_kids ? S.
                     filtered[k] = v
                 else:
                     filtered[k] = v  # default_kernels_dict negative-int entries

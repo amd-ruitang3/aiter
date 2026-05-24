@@ -72,6 +72,9 @@ from opus_gemm_common import (
     a16w16_persistent_kernels_list_cpol,
     a16w16_persistent_kernels_list_nooob,
     a16w16_persistent_kernels_list_cpol_nooob,
+    gfx942_a16w16_kernels_list,
+    gfx942_a16w16_splitk_kernels_list,
+    gfx942_a16w16_splitk_fused_kernels_list,
     SPLITK_KIDS,
     NON_SPLITK_KIDS,
     BIAS_AWARE_KIDS,
@@ -315,7 +318,7 @@ def candidate_kids_for_shape(M, N, K, bias, cu_num):
 
     4) Bias post-filter: if bias is True, drop kids that are not in
        BIAS_AWARE_KIDS. If that leaves the candidate set empty (corner
-       case: SPLITK_KIDS minus bias-aware ⊆ SPLITK_KIDS is fully
+       case: SPLITK_KIDS minus bias-aware ? SPLITK_KIDS is fully
        bias-aware, so this should not fire in practice), fall back to
        SPLITK_KIDS again.
 
@@ -355,9 +358,28 @@ def candidate_kids_for_shape(M, N, K, bias, cu_num):
     if bias:
         narrowed = cands & BIAS_AWARE_KIDS
         if not narrowed:
-            # SPLITK_KIDS ⊆ BIAS_AWARE_KIDS, so this is a safety net.
-            return SPLITK_KIDS
-        return narrowed
+            # SPLITK_KIDS ? BIAS_AWARE_KIDS, so this is a safety net.
+            cands = SPLITK_KIDS
+        else:
+            cands = narrowed
+
+    # Step 5: arch post-filter. Drop kids whose arch_prefix doesn't match
+    # the running GPU. Without this, on a gfx942 box the tuner would
+    # dispatch every gfx950 splitk kid (200..223 + nooob mirrors) to a
+    # worker that has no gfx942 tune_lookup entry for them; the worker
+    # then aborts in AITER_CHECK and mp_tuner deadlocks waiting for a
+    # result that will never come.
+    try:
+        from aiter.jit.utils.chip_info import get_gfx_runtime
+        from opus_gemm_common import kernels_list as _klist
+        _run_arch = get_gfx_runtime().lower()
+        cands = frozenset(
+            kid for kid in cands
+            if (getattr(_klist.get(kid), "arch_prefix", "") or "gfx950").lower()
+            == _run_arch
+        )
+    except Exception:
+        pass  # unknown arch -> keep legacy multi-arch behaviour
     return cands
 
 
@@ -418,9 +440,21 @@ def _ensure_kids_compiled(candidate_kids):
     """
     from aiter.jit import core as _jit_core
     from aiter.jit.utils.file_baton import FileBaton
+    from opus_gemm_common import heuristic_kids_for_arch
 
     candidate_kids = frozenset(int(k) for k in candidate_kids)
-    required = candidate_kids | HEURISTIC_DEFAULT_KIDS
+    # Restrict the heuristic-default kid set to the running GPU's arch.
+    # gen_instances.py applies the same arch filter to the compile set S
+    # (using GPU_ARCHS env / rocminfo); pulling in cross-arch heuristic
+    # kids here would make `required > sidecar` permanently true on a
+    # single-arch build and put _ensure_kids_compiled into a rebuild loop.
+    try:
+        from aiter.jit.utils.chip_info import get_gfx_runtime
+        _run_arch = get_gfx_runtime().lower()
+        _heuristic = heuristic_kids_for_arch({_run_arch})
+    except Exception:
+        _heuristic = HEURISTIC_DEFAULT_KIDS  # unknown -> multi-arch fallback
+    required = candidate_kids | _heuristic
 
     def _read_sidecar(path):
         if not os.path.exists(path):
@@ -638,7 +672,7 @@ _AITER_VERBOSE = bool(int(os.environ.get("AITER_VERBOSE", "0")))
 #       2004..4009   cpol Mheavy/Nheavy/balanced
 #       5004..7009   cpol Mheavy/Nheavy/balanced + nooob
 #   * a16w16_flatmm        (kids 100..115, currently empty) - ignores splitK
-#   * a16w16_flatmm_splitk (kids 200..223 + nooob mirrors) - splitK ∈ {0, 1..16}
+#   * a16w16_flatmm_splitk (kids 200..223 + nooob mirrors) - splitK ? {0, 1..16}
 #   * a16w16_persistent:
 #       300..303     legacy           cpol = (0, 17)
 #       304..315     cpol Mheavy/Nheavy/balanced
@@ -661,11 +695,31 @@ a16w16_all_kernels = {
     **a16w16_persistent_kernels_list_cpol,
     **a16w16_persistent_kernels_list_nooob,
     **a16w16_persistent_kernels_list_cpol_nooob,
+    **gfx942_a16w16_kernels_list,
+    **gfx942_a16w16_splitk_kernels_list,
+    **gfx942_a16w16_splitk_fused_kernels_list,
 }
-a16w16_kernel_ids = sorted(a16w16_all_kernels.keys())
+
+# Arch-filter the kid enumeration so the tuner only dispatches kids whose
+# pipeline body has a non-empty implementation on the running GPU. On gfx942
+# the gfx950 kids (4..9, 200..223 + mirrors, 300..315 + mirrors) link as
+# empty stubs and their per-arch tune_lookup table has no entry -> any
+# probe AITER_CHECK-throws on the worker and deadlocks mp_tuner. The reverse
+# applies on gfx950.
+try:
+    from aiter.jit.utils.chip_info import get_gfx_runtime
+    _run_arch = get_gfx_runtime().lower()
+    a16w16_kernel_ids = sorted(
+        kid for kid, k in a16w16_all_kernels.items()
+        if (getattr(k, "arch_prefix", "") or "gfx950").lower() == _run_arch
+    )
+except Exception:
+    # rocminfo unavailable -> fall back to enumerating everything so the
+    # legacy multi-arch behaviour is preserved on build-only hosts.
+    a16w16_kernel_ids = sorted(a16w16_all_kernels.keys())
 
 
-# ── dtype handling ──────────────────────────────────────────────────────────
+# -- dtype handling ----------------------------------------------------------
 #
 # CSV convention (matches gptoss_bf16_*_gemm.csv schema): dtype / outdtype
 # columns store the str(torch.dtype) form, i.e. "torch.bfloat16" or
@@ -1055,7 +1109,7 @@ class OpusGemmA16W16Tuner(GemmCommonTuner):
         "untune_file": "aiter/configs/model_configs/gptoss_bf16_untuned_gemm.csv",
         # Tighter than GemmCommonTuner default (0.05). Under CUDA graph mode
         # the only numerical guard is mp_tuner.worker's post-run
-        # checkAllclose(err_ratio) — per-iter max_delta check is also done in
+        # checkAllclose(err_ratio) -- per-iter max_delta check is also done in
         # run_opus_gemm_bench (see below), but this gate catches silent "only
         # a few cells wrong" bugs (e.g. N not aligned to VEC_C vector store
         # width causes sporadic cross-row writes; only ~0.001 fraction of
@@ -1699,10 +1753,48 @@ class OpusGemmA16W16Tuner(GemmCommonTuner):
                 # tuner doesn't spam mp_tuner with bias-rejection errors.
                 if _kid_rejects_bias(k_inst, bias_v):
                     continue
+                # outdtype filter: the per-arch tune_lookup tables are keyed
+                # by (kid, D_C). For non-splitk kids `output_dtypes` IS the
+                # set of Y dtypes the kid can write, so filtering on it
+                # matches the runtime lookup exactly.
+                #
+                # Splitk kids are different: `output_dtypes=["fp32_t"]` names
+                # the D_C workspace template, not the Y dtype. The runtime
+                # dispatcher (`opus_kid_is_splitk` in opus_gemm.cu) forces
+                # those kids through the <fp32_t> table regardless of Y, and
+                # the launcher then branches on Y.dtype() internally to
+                # instantiate the bf16 or fp32 main/reduce kernel. So splitk
+                # kids accept any supported Y dtype at tune time too --
+                # exempt them from the lookup-table dtype gate.
+                _OUT_TORCH_TO_CTYPE = {
+                    dtypes.bf16: "bf16_t",
+                    dtypes.fp32: "fp32_t",
+                }
+                _is_splitk_tag = k_inst.kernel_tag in (
+                    "a16w16_flatmm_splitk",
+                    "a16w16_splitk",
+                    "a16w16_splitk_fused",
+                )
+                _need = _OUT_TORCH_TO_CTYPE.get(out_dtype)
+                if (
+                    not _is_splitk_tag
+                    and _need is not None
+                    and _need not in getattr(k_inst, "output_dtypes", [])
+                ):
+                    continue
 
                 # SplitK candidate set per shape+kid. Non-splitk kids always
-                # get splitK=0; splitk kids go through the heuristic.
-                if k_inst.kernel_tag == "a16w16_flatmm_splitk":
+                # get splitK=0; splitk kids go through the heuristic. The
+                # gfx942 splitk pipelines use distinct kernel_tag values
+                # ("a16w16_splitk" / "a16w16_splitk_fused") -- without
+                # including them here, the tuner forces splitK=0 and the
+                # kernel runs as a single non-split slice, costing ~3x
+                # over the splitK-tuned baseline on K-heavy shapes.
+                if k_inst.kernel_tag in (
+                    "a16w16_flatmm_splitk",
+                    "a16w16_splitk",
+                    "a16w16_splitk_fused",
+                ):
                     splitK_range = candidate_splitK(M, N, K, batch, cu_num, k_inst)
                 else:
                     splitK_range = [0]
