@@ -42,6 +42,16 @@ except ImportError as exc:
         allow_module_level=True,
     )
 
+try:
+    from vllm.model_executor.layers.fla.ops.chunk_delta_h import (
+        chunk_gated_delta_rule_fwd_h as chunk_gated_delta_rule_fwd_h_vllm,
+    )
+
+    _HAS_VLLM_K5 = True
+except Exception:
+    chunk_gated_delta_rule_fwd_h_vllm = None
+    _HAS_VLLM_K5 = False
+
 torch.set_default_device("cuda")
 
 
@@ -413,6 +423,19 @@ class PrefillArgs:
     # accumulator unchanged for both choices; bf16 only affects HBM
     # bandwidth/footprint of the SSM state.
     ssm_state_dtype: torch.dtype = torch.float32
+    # If set, override ``_build_context_lens(full_prompt_len,
+    # max_num_batched_tokens)`` and use these segment lengths verbatim.
+    # Used by trace-derived ragged-batch cases (e.g. the prefill_gdr.log
+    # 407-shape set imported below) that cannot be expressed as the
+    # "k equal segments + remainder" recipe ``_build_context_lens``
+    # produces. ``None`` (the default) preserves the existing behavior
+    # for every hand-written ``PrefillGroup`` row.
+    context_lens: object = None  # list[int] | None
+    # Free-form tag used in __repr__ when ``context_lens`` is set, so
+    # parametrized-test IDs stay short and unique even when many trace
+    # shapes share the same ``(T, num_seqs)``. Typical values are a log
+    # count or a hex digest of cu_seqlens.
+    trace_tag: str = ""
 
     @property
     def Hg(self):
@@ -422,7 +445,29 @@ class PrefillArgs:
     def H(self):
         return self.Hv // self.tp
 
+    def resolve_context_lens(self):
+        """Return the per-segment token counts this case wants.
+
+        For trace-derived cases this is the ``cu_seqlens`` diff list
+        captured from the source workload; for hand-written cases it is
+        the equal-length recipe ``_build_context_lens`` emits.
+        """
+        if self.context_lens is not None:
+            return list(self.context_lens)
+        return _build_context_lens(self.full_prompt_len, self.max_num_batched_tokens)
+
     def __repr__(self):
+        # Trace-derived cases have a bespoke cu_seqlens; surface enough
+        # to identify the shape but elide the cu_seqlens themselves
+        # (they can be 64+ entries long).
+        if self.context_lens is not None:
+            n = len(self.context_lens)
+            T = sum(self.context_lens)
+            tag = self.model_name or "trace"
+            tag += f"_T{T}_n{n}"
+            if self.trace_tag:
+                tag += f"_{self.trace_tag}"
+            return tag
         tag = self.model_name + "_" if self.model_name else ""
         tag += f"K{self.K}_V{self.V}_Hk{self.Hk}_Hv{self.Hv}"
         tag += f"_TP{self.tp}_T{self.full_prompt_len}"
@@ -438,225 +483,350 @@ class PrefillArgs:
 NUM_WARMUP = 5
 NUM_ITERS = 50
 
-PREFILL_PARAMS = [
-    # non-varlen + no final state
-    PrefillArgs(
-        K=128,
-        V=128,
-        Hk=16,
-        Hv=32,
-        tp=1,
-        full_prompt_len=2500,
+
+@dataclass
+class PrefillGroup:
+    """A compact spec for a family of ``PrefillArgs`` cases that share every
+    field except ``tp`` and ``full_prompt_len``.
+
+    ``expand_groups`` takes a list of these and returns the flat
+    ``PrefillArgs`` list that ``pytest.parametrize`` consumes. For each
+    group, the (tps x full_prompt_lens) Cartesian product is materialised,
+    and ``max_num_batched_tokens`` defaults to ``full_prompt_len`` when not
+    explicitly set (matches the existing per-case behavior of the
+    non-varlen rows). varlen/fs cases that previously left
+    ``max_num_batched_tokens`` at its dataclass default (32768) can omit
+    it here too.
+
+    The display tag still encodes (tp, full_prompt_len) via
+    ``PrefillArgs.__repr__``, so pytest IDs stay unique even when several
+    expanded cases share the same ``model_name``.
+    """
+
+    model_name: str
+    Hv: int
+    tps: list
+    full_prompt_lens: list
+    Hk: int = 16
+    K: int = 128
+    V: int = 128
+    BT: int = 64
+    dtype: torch.dtype = torch.bfloat16
+    is_varlen: bool = True
+    output_final_state: bool = True
+    ssm_state_dtype: torch.dtype = torch.float32
+    # Three semantics for ``max_num_batched_tokens``:
+    #   - int : use this exact value for every expanded case (e.g. you want
+    #           a fixed scheduler budget across a sweep of full_prompt_len).
+    #   - "full_prompt_len" : tie it to each case's full_prompt_len. The
+    #           original non-varlen Qwen3.5-35B / 397B rows wrote
+    #           ``max_num_batched_tokens=full_prompt_len`` explicitly, which
+    #           makes ``_build_context_lens`` return exactly one segment.
+    #   - None (default) : fall back to the ``PrefillArgs`` dataclass
+    #           default (32768). The original varlen rows omitted this
+    #           field, so they implicitly used 32768 -- which makes
+    #           ``_build_context_lens(1024, 32768)`` produce 32 segments of
+    #           length 1024. Preserving that behavior is what keeps the
+    #           varlen path's per-case shape unchanged across this refactor.
+    max_num_batched_tokens: object = None
+
+
+def expand_groups(groups):
+    out = []
+    for g in groups:
+        for tp in g.tps:
+            for full_len in g.full_prompt_lens:
+                if g.max_num_batched_tokens == "full_prompt_len":
+                    mnbt = full_len
+                elif g.max_num_batched_tokens is None:
+                    mnbt = 32768  # PrefillArgs dataclass default
+                else:
+                    mnbt = g.max_num_batched_tokens
+                out.append(
+                    PrefillArgs(
+                        K=g.K,
+                        V=g.V,
+                        Hk=g.Hk,
+                        Hv=g.Hv,
+                        tp=tp,
+                        full_prompt_len=full_len,
+                        model_name=g.model_name,
+                        BT=g.BT,
+                        max_num_batched_tokens=mnbt,
+                        dtype=g.dtype,
+                        is_varlen=g.is_varlen,
+                        output_final_state=g.output_final_state,
+                        ssm_state_dtype=g.ssm_state_dtype,
+                    )
+                )
+    return out
+
+
+_PREFILL_GROUPS = [
+    # non-varlen + no final state (Qwen3.5-35B family, Hv=32).
+    # Original rows set max_num_batched_tokens == full_prompt_len so that
+    # _build_context_lens emits exactly one segment of length full_prompt_len.
+    PrefillGroup(
         model_name="Qwen3.5-35B",
-        is_varlen=False,
-        output_final_state=False,
-        max_num_batched_tokens=2500,
-    ),
-    PrefillArgs(
-        K=128,
-        V=128,
-        Hk=16,
         Hv=32,
-        tp=1,
-        full_prompt_len=60000,
-        model_name="Qwen3.5-35B",
+        tps=[1, 2],
+        full_prompt_lens=[2500, 60000, 128000],
         is_varlen=False,
         output_final_state=False,
-        max_num_batched_tokens=60000,
+        max_num_batched_tokens="full_prompt_len",
     ),
-    PrefillArgs(
-        K=128,
-        V=128,
-        Hk=16,
-        Hv=32,
-        tp=1,
-        full_prompt_len=128000,
-        model_name="Qwen3.5-35B",
-        is_varlen=False,
-        output_final_state=False,
-        max_num_batched_tokens=128000,
-    ),
-    PrefillArgs(
-        K=128,
-        V=128,
-        Hk=16,
-        Hv=32,
-        tp=2,
-        full_prompt_len=2500,
-        model_name="Qwen3.5-35B",
-        is_varlen=False,
-        output_final_state=False,
-        max_num_batched_tokens=2500,
-    ),
-    PrefillArgs(
-        K=128,
-        V=128,
-        Hk=16,
-        Hv=32,
-        tp=2,
-        full_prompt_len=60000,
-        model_name="Qwen3.5-35B",
-        is_varlen=False,
-        output_final_state=False,
-        max_num_batched_tokens=60000,
-    ),
-    PrefillArgs(
-        K=128,
-        V=128,
-        Hk=16,
-        Hv=32,
-        tp=2,
-        full_prompt_len=128000,
-        model_name="Qwen3.5-35B",
-        is_varlen=False,
-        output_final_state=False,
-        max_num_batched_tokens=128000,
-    ),
-    PrefillArgs(
-        K=128,
-        V=128,
-        Hk=16,
-        Hv=64,
-        tp=1,
-        full_prompt_len=2500,
+    # non-varlen + no final state (Qwen3.5-397B family, Hv=64).
+    PrefillGroup(
         model_name="Qwen3.5-397B",
+        Hv=64,
+        tps=[1, 2],
+        full_prompt_lens=[2500, 60000, 128000],
         is_varlen=False,
         output_final_state=False,
-        max_num_batched_tokens=2500,
+        max_num_batched_tokens="full_prompt_len",
     ),
-    PrefillArgs(
-        K=128,
-        V=128,
-        Hk=16,
+    # varlen + final_state (default path), TP=4 / TP=8 share everything
+    # else, so they collapse into a single group. Original rows left
+    # max_num_batched_tokens at the PrefillArgs default of 32768, which
+    # makes _build_context_lens slice 32768 into ceil(32768/full_len)
+    # equal-length segments (e.g. 32 segments of length 1024 for the
+    # 1k row). Keeping ``max_num_batched_tokens=None`` here preserves that.
+    PrefillGroup(
+        model_name="Qwen3.5-varlen-fs",
         Hv=64,
-        tp=1,
-        full_prompt_len=60000,
-        model_name="Qwen3.5-397B",
-        is_varlen=False,
-        output_final_state=False,
-        max_num_batched_tokens=60000,
+        tps=[4, 8],
+        full_prompt_lens=[1024, 2048, 4096, 8192],
     ),
-    PrefillArgs(
-        K=128,
-        V=128,
-        Hk=16,
-        Hv=64,
-        tp=1,
-        full_prompt_len=128000,
-        model_name="Qwen3.5-397B",
-        is_varlen=False,
-        output_final_state=False,
-        max_num_batched_tokens=128000,
-    ),
-    PrefillArgs(
-        K=128,
-        V=128,
-        Hk=16,
-        Hv=64,
-        tp=2,
-        full_prompt_len=2500,
-        model_name="Qwen3.5-397B",
-        is_varlen=False,
-        output_final_state=False,
-        max_num_batched_tokens=2500,
-    ),
-    PrefillArgs(
-        K=128,
-        V=128,
-        Hk=16,
-        Hv=64,
-        tp=2,
-        full_prompt_len=60000,
-        model_name="Qwen3.5-397B",
-        is_varlen=False,
-        output_final_state=False,
-        max_num_batched_tokens=60000,
-    ),
-    PrefillArgs(
-        K=128,
-        V=128,
-        Hk=16,
-        Hv=64,
-        tp=2,
-        full_prompt_len=128000,
-        model_name="Qwen3.5-397B",
-        is_varlen=False,
-        output_final_state=False,
-        max_num_batched_tokens=128000,
-    ),
-    # varlen + final_state (default path)
-    PrefillArgs(
-        K=128,
-        V=128,
-        Hk=16,
-        Hv=64,
-        tp=4,
-        full_prompt_len=1024,
-        model_name="Qwen3.5-tp4-1k",
-    ),
-    PrefillArgs(
-        K=128,
-        V=128,
-        Hk=16,
-        Hv=64,
-        tp=4,
-        full_prompt_len=2048,
-        model_name="Qwen3.5-tp4-2k",
-    ),
-    PrefillArgs(
-        K=128,
-        V=128,
-        Hk=16,
-        Hv=64,
-        tp=4,
-        full_prompt_len=4096,
-        model_name="Qwen3.5-tp4-4k",
-    ),
-    PrefillArgs(
-        K=128,
-        V=128,
-        Hk=16,
-        Hv=64,
-        tp=4,
-        full_prompt_len=8192,
-        model_name="Qwen3.5-tp4-8k",
-    ),
-    PrefillArgs(
-        K=128,
-        V=128,
-        Hk=16,
-        Hv=64,
-        tp=8,
-        full_prompt_len=1024,
-        model_name="Qwen3.5-tp8-1k",
-    ),
-    PrefillArgs(
-        K=128,
-        V=128,
-        Hk=16,
-        Hv=64,
-        tp=8,
-        full_prompt_len=2048,
-        model_name="Qwen3.5-tp8-2k",
-    ),
-    PrefillArgs(
-        K=128,
-        V=128,
-        Hk=16,
-        Hv=64,
-        tp=8,
-        full_prompt_len=4096,
-        model_name="Qwen3.5-tp8-4k",
-    ),
-    PrefillArgs(
-        K=128,
-        V=128,
-        Hk=16,
-        Hv=64,
-        tp=8,
-        full_prompt_len=8192,
-        model_name="Qwen3.5-tp8-8k",
-    ),
+]
+
+PREFILL_PARAMS = expand_groups(_PREFILL_GROUPS)
+
+
+# -- Trace-derived parametrization --------------------------------------
+#
+# Pull the 407 unique ``(T, cu_seqlens)`` shapes embedded in
+# ``ganyi_bench_k5_gdr_inline.py`` (extracted from
+# ``prefill_gdr.log`` -- 28,152 prefill GDN calls under
+# Qwen3-Next-80B-A3B-Instruct-FP8, TP=1) and turn each one into a
+# ``PrefillArgs`` whose ``context_lens`` field carries the ragged
+# layout verbatim.
+#
+# Two subsets are exposed:
+#
+#   * ``TRACE_REPRESENTATIVE_PARAMS`` -- ~10 shapes covering the
+#     high-impact regions of the trace plus 1-2 regression sentinels
+#     (FlyDSL-K5's known weak point). Always parametrized so the perf
+#     test catches obvious regressions in CI.
+#
+#   * ``TRACE_FULL_PARAMS`` -- all 407 shapes. Only attached to
+#     ``PREFILL_PARAMS`` when ``--run-slow`` is passed (see conftest
+#     hook ``pytest_collection_modifyitems`` at the bottom of this
+#     file). Skipped by default so default ``pytest`` runs stay fast.
+#
+# Bench-script path is resolved relative to the aiter repo root so the
+# logic still works after ``pip install -e``: it walks up from this
+# test file to ``/workspace`` and looks for the bench script under
+# ``flydsl_k5_basic_info_0520/``. If the script is missing (e.g.
+# someone runs the tests outside this dev tree), we silently produce
+# an empty trace param list so the existing PREFILL_PARAMS tests
+# still run.
+import hashlib as _hashlib
+import os as _os
+
+
+_TRACE_HEAD_DIMS = dict(
+    K=128, V=128, Hk=16, Hv=32, tp=1, BT=64,
+    is_varlen=True, output_final_state=True,
+    ssm_state_dtype=torch.float32,
+)
+
+
+def _find_trace_bench_script():
+    """Locate ``ganyi_bench_k5_gdr_inline.py`` next to this aiter checkout."""
+    here = _os.path.dirname(_os.path.abspath(__file__))
+    workspace = here
+    for _ in range(8):
+        candidate = _os.path.join(
+            workspace, "flydsl_k5_basic_info_0520",
+            "ganyi_bench_k5_gdr_inline.py",
+        )
+        if _os.path.isfile(candidate):
+            return candidate
+        parent = _os.path.dirname(workspace)
+        if parent == workspace:
+            break
+        workspace = parent
+    return None
+
+
+def _parse_trace_shapes(bench_script_path):
+    """Parse the ``_SHAPES_RAW`` literal in the bench script.
+
+    Returns a list of dicts ``{log_count, T, cu, context_lens}`` (one
+    per unique trace shape, sorted by log_count descending -- same
+    order the bench produces).
+    """
+    if not bench_script_path:
+        return []
+    try:
+        with open(bench_script_path) as f:
+            src = f.read()
+    except OSError:
+        return []
+    import re as _re
+    m = _re.search(r'_SHAPES_RAW = """\s*\n(.*?)\n"""', src, _re.DOTALL)
+    if not m:
+        return []
+    out = []
+    for line in m.group(1).strip().splitlines():
+        log_count_s, T_s, cu_s = line.split("|", 2)
+        cu = [int(x) for x in cu_s.split()]
+        T = int(T_s)
+        out.append({
+            "log_count": int(log_count_s),
+            "T": T,
+            "cu": cu,
+            "context_lens": [cu[i + 1] - cu[i] for i in range(len(cu) - 1)],
+        })
+    return out
+
+
+def _trace_shape_to_args(shape, *, model_name="Qwen3Next-trace"):
+    """Wrap one parsed trace shape into a ``PrefillArgs``."""
+    # cu_seqlens can be 64 entries long, so hash it for a short tag
+    # that's still unique across shapes that share (T, num_seqs).
+    cu_digest = _hashlib.md5(
+        " ".join(map(str, shape["cu"])).encode()
+    ).hexdigest()[:6]
+    return PrefillArgs(
+        full_prompt_len=shape["T"],
+        max_num_batched_tokens=shape["T"],
+        model_name=model_name,
+        context_lens=shape["context_lens"],
+        trace_tag=f"cnt{shape['log_count']}_{cu_digest}",
+        **_TRACE_HEAD_DIMS,
+    )
+
+
+_TRACE_BENCH_SCRIPT = _find_trace_bench_script()
+_TRACE_SHAPES = _parse_trace_shapes(_TRACE_BENCH_SCRIPT)
+
+# Selected ~10 representative shapes spanning the trace's main regimes.
+# Selection criteria (keep in sync with the docstring above):
+#
+#   1) Top-3 highest log_count single-segment cases (true single-seq
+#      prefill; tests the no-batch K5 path).
+#   2) Top-3 highest log_count "1-token prefixes + long tail" cases
+#      (the most frequent ragged pattern in the trace).
+#   3) Three T=32768 mainstream-batch cases (T=32768 == 44.2% of all
+#      log calls).
+#   4) Two FlyDSL-K5 weak-spot sentinels: small T + large num_seqs,
+#      where rule-based BV=64 is a poor fit (regression guard).
+#
+# Trace shapes are matched by ``(T, num_seqs, cu[1:5])`` -- a tuple
+# we store inline so the selection survives shape-list reordering.
+_REP_SELECTORS = [
+    # 1) Single-segment cases (n_seqs == 1):
+    (1000,    1, (1000,)),
+    (5000,    1, (5000,)),
+    (10000,   1, (10000,)),
+    # 2) 1-token-prefix + long tail (most frequent ragged pattern):
+    (5063,   64, (1, 2, 3, 4)),    # cnt=756, the trace-frequency #1 shape
+    (1063,   64, (1, 2, 3, 4)),    # cnt=648
+    (5031,   32, (1, 2, 3, 4)),    # cnt=612
+    # 3) T=32768 mainstream-batch cases:
+    (32768,   5, (1, 10001, 20001, 30001, 32768)),  # cnt=252
+    (32768,   8, (1, 2, 3, 4, 7237)),                # cnt=252
+    (32768,  11, (1, 2, 3, 4, 5004)),                # cnt=216
+    # 4) FlyDSL-K5 weak-spot sentinels (smallest tri/fly ratios in
+    #    the 407-shape bench: 0.25x and 0.40x respectively):
+    (1051,   52, (1, 2, 3, 4)),
+    (32768,  62, (1, 2, 3, 4, 5)),
+]
+
+
+def _build_representative_trace_params():
+    """Filter ``_TRACE_SHAPES`` down to the 10-or-so selectors above.
+
+    Match on ``(T, num_seqs, tuple(cu[1:1+k]))`` where ``k`` is the
+    selector's prefix length, so we don't have to encode the entire
+    cu_seqlens and the matching is robust to logically-equivalent
+    layouts (none currently exist in the trace, but it's cheap).
+    """
+    out = []
+    by_key = {}
+    for s in _TRACE_SHAPES:
+        n = len(s["cu"]) - 1
+        key = (s["T"], n)
+        by_key.setdefault(key, []).append(s)
+    for T, n, cu_prefix in _REP_SELECTORS:
+        candidates = by_key.get((T, n), [])
+        match = None
+        for s in candidates:
+            if tuple(s["cu"][1:1 + len(cu_prefix)]) == cu_prefix:
+                match = s
+                break
+        if match is None and candidates:
+            # If the cu prefix doesn't match exactly, fall back to the
+            # highest-frequency shape sharing (T, n_seqs). Helps the
+            # selectors stay stable if the bench script's exact cu
+            # layout for a (T, n) pair changes slightly.
+            match = max(candidates, key=lambda s: s["log_count"])
+        if match is not None:
+            out.append(_trace_shape_to_args(match,
+                                             model_name="Qwen3Next-rep"))
+    return out
+
+
+def _build_full_trace_params():
+    """All 407 trace shapes, sorted by log_count descending."""
+    return [_trace_shape_to_args(s) for s in _TRACE_SHAPES]
+
+
+TRACE_REPRESENTATIVE_PARAMS = _build_representative_trace_params()
+TRACE_FULL_PARAMS = _build_full_trace_params()
+
+# Always include the ~10 representative trace shapes in the standard
+# parametrization -- they're small, deterministic, and serve as
+# regression sentinels for FlyDSL-K5's known weak points.
+PREFILL_PARAMS.extend(TRACE_REPRESENTATIVE_PARAMS)
+
+# A perf-only parametrization that *also* includes every remaining
+# trace shape (~395), each tagged with ``pytest.mark.slow`` so it is
+# skipped by default. The ``slow`` marker is honored by this directory's
+# ``conftest.py`` (which adds the ``--run-slow`` CLI flag); slow tests
+# are skipped unless ``--run-slow`` is passed. Only
+# ``TestPerformance.test_perf_comparison`` parametrizes over this
+# expanded list -- correctness tests stick with the standard
+# ``PREFILL_PARAMS`` to keep their wall time bounded.
+#
+# To run default + every slow trace shape together:
+#
+#   pytest -sv --run-slow \
+#     aiter/ops/flydsl/test_flydsl_linear_attention_prefill.py::TestPerformance
+#
+# To run only the slow trace shapes:
+#
+#   pytest -sv --run-slow -k Qwen3Next-trace \
+#     aiter/ops/flydsl/test_flydsl_linear_attention_prefill.py::TestPerformance
+_REP_TAGS = {a.trace_tag for a in TRACE_REPRESENTATIVE_PARAMS}
+_TRACE_SLOW_ONLY_PARAMS = [
+    pytest.param(a, id=repr(a), marks=pytest.mark.slow)
+    for a in TRACE_FULL_PARAMS
+    if a.trace_tag not in _REP_TAGS
+]
+PERF_PARAMS = list(PREFILL_PARAMS) + _TRACE_SLOW_ONLY_PARAMS
+
+# pytest IDs for ``PERF_PARAMS``. ``pytest.param`` entries already have
+# their own ``id=`` assigned (we set ``id=repr(a)`` above); only the
+# bare ``PrefillArgs`` rows from ``PREFILL_PARAMS`` need a manual
+# ``repr()`` since ``pytest.parametrize`` defaults to ``args0``,
+# ``args1``, ... when ``ids=`` is omitted, which buries the shape info
+# and breaks ``-k`` substring filtering. We pass ``None`` for the
+# pre-tagged entries so pytest uses the embedded id.
+PERF_TEST_IDS = [
+    repr(p) if isinstance(p, PrefillArgs) else None
+    for p in PERF_PARAMS
 ]
 
 
@@ -967,9 +1137,7 @@ class TestCorrectness:
 
     @pytest.mark.parametrize("args", PREFILL_PARAMS, ids=PREFILL_TEST_IDS)
     def test_correctness_flydsl(self, args: PrefillArgs):
-        context_lens = _build_context_lens(
-            args.full_prompt_len, args.max_num_batched_tokens
-        )
+        context_lens = args.resolve_context_lens()
         k, w_orig, u_orig, w_c, u_c, g, h0, cu, _ = _make_inputs(
             context_lens, args=args
         )
@@ -1009,9 +1177,7 @@ class TestCorrectness:
         """Triton VK K5 (h: [V, K]) -- same input/output layout as FlyDSL."""
         if args.ssm_state_dtype != torch.float32:
             pytest.skip("Triton VK reference only supports f32 SSM state.")
-        context_lens = _build_context_lens(
-            args.full_prompt_len, args.max_num_batched_tokens
-        )
+        context_lens = args.resolve_context_lens()
         k, w_orig, u_orig, w_c, u_c, g, h0, cu, _ = _make_inputs(
             context_lens, args=args
         )
@@ -1057,9 +1223,7 @@ class TestCorrectness:
         """
         if args.ssm_state_dtype != torch.float32:
             pytest.skip("Triton KV reference only supports f32 SSM state.")
-        context_lens = _build_context_lens(
-            args.full_prompt_len, args.max_num_batched_tokens
-        )
+        context_lens = args.resolve_context_lens()
         k, w_orig, u_orig, w_c, u_c, g, h0, cu, _ = _make_inputs(
             context_lens, args=args
         )
@@ -1110,9 +1274,7 @@ class TestCorrectness:
         """
         if args.ssm_state_dtype != torch.float32:
             pytest.skip("Triton origin reference only supports f32 SSM state.")
-        context_lens = _build_context_lens(
-            args.full_prompt_len, args.max_num_batched_tokens
-        )
+        context_lens = args.resolve_context_lens()
         k, w_orig, u_orig, w_c, u_c, g, h0, cu, _ = _make_inputs(
             context_lens, args=args
         )
@@ -1172,6 +1334,88 @@ class TestCorrectness:
                 msg="triton_origin: final_state mismatch",
             )
 
+    @pytest.mark.skipif(
+        not _HAS_VLLM_K5,
+        reason="vllm.model_executor.layers.fla.ops.chunk_delta_h not importable",
+    )
+    @pytest.mark.parametrize("args", PREFILL_PARAMS, ids=PREFILL_TEST_IDS)
+    def test_correctness_vllm(self, args: PrefillArgs):
+        """vLLM upstream K5 (h: [V, K]) -- same input/output layout as FlyDSL.
+
+        vLLM's ``chunk_gated_delta_rule_fwd_h`` is the FLA upstream port that
+        powers ``vllm.model_executor.layers.fla.ops.chunk_gated_delta_rule``,
+        and shares the ``chunk_gated_delta_rule_fwd_kernel_h_blockdim64``
+        kernel source with aiter's ``opt_vk``. We still cover it explicitly
+        to catch upstream version drift (e.g. signature, scaling factors,
+        or default chunk_size changes that would not show up in the aiter
+        ``opt_vk`` test above).
+        """
+        if args.ssm_state_dtype != torch.float32:
+            pytest.skip("vLLM K5 reference only supports f32 SSM state.")
+        context_lens = args.resolve_context_lens()
+        k, w_orig, u_orig, w_c, u_c, g, h0, cu, _ = _make_inputs(
+            context_lens, args=args
+        )
+
+        # vLLM's host wrapper infers ``H = u.shape[-2]`` and ``T = k.shape[1]``
+        # (T-major), so it needs the un-permuted ``w_orig`` / ``u_orig`` of
+        # shape ``[B, T, H, *]``, NOT the H-major ``w_c`` / ``u_c`` that
+        # aiter's ``opt_vk`` consumes. Feeding ``u_c`` would make vLLM think
+        # ``H = T`` and try to allocate ``(B, NT, T, V, K)`` for ``h``
+        # (terabytes for long contexts). vLLM supports GQA natively, so we
+        # also do NOT repeat_interleave ``k``.
+        h_vllm, vn_vllm, fs_vllm = chunk_gated_delta_rule_fwd_h_vllm(
+            k,
+            w_orig,
+            u_orig,
+            g=g,
+            initial_state=h0,
+            output_final_state=args.output_final_state,
+            cu_seqlens=cu,
+        )
+        h_ref, vn_ref, fs_ref = ref_chunk_gated_delta_rule_fwd_h(
+            k,
+            w_orig,
+            u_orig,
+            g=g,
+            initial_state=h0,
+            output_final_state=args.output_final_state,
+            cu_seqlens=cu,
+        )
+
+        # vLLM's ``v_new = empty_like(u_orig)`` is already T-major [B, T, H, V],
+        # matching ``vn_ref`` directly -- we must NOT route through
+        # ``_assert_k5_outputs_match_ref`` because that helper calls
+        # ``_normalize_opt_v_new`` (permute 0,2,1,3) on the assumption that the
+        # K5 returned ``v_new`` in head-major [B, H, T, V] layout (aiter's
+        # convention). ``h`` and ``final_state`` follow the same vk layout as
+        # the aiter ``opt_vk`` path, so we compare them directly.
+        atol, rtol = 5e-2, 5e-2
+        torch.testing.assert_close(
+            h_vllm.float(),
+            h_ref.float(),
+            atol=atol,
+            rtol=rtol,
+            msg="vllm: h mismatch",
+        )
+        torch.testing.assert_close(
+            vn_vllm.float(),
+            vn_ref.float(),
+            atol=atol,
+            rtol=rtol,
+            msg="vllm: v_new mismatch",
+        )
+        if args.output_final_state:
+            torch.testing.assert_close(
+                fs_vllm.float(),
+                fs_ref.float(),
+                atol=atol,
+                rtol=rtol,
+                msg="vllm: final_state mismatch",
+            )
+        else:
+            assert fs_vllm is None, "vllm: expected None final_state"
+
     @pytest.mark.parametrize("args", PREFILL_PARAMS, ids=PREFILL_TEST_IDS)
     def test_correctness_triton_origin_opt(self, args: PrefillArgs):
         """triton_origin_opt K5: standalone fwd_h (BV=16 + exp2) variant.
@@ -1183,9 +1427,7 @@ class TestCorrectness:
         """
         if args.ssm_state_dtype != torch.float32:
             pytest.skip("triton_origin_opt reference only supports f32 SSM state.")
-        context_lens = _build_context_lens(
-            args.full_prompt_len, args.max_num_batched_tokens
-        )
+        context_lens = args.resolve_context_lens()
         k, w_orig, u_orig, w_c, u_c, g, h0, cu, _ = _make_inputs(
             context_lens, args=args
         )
@@ -1297,9 +1539,7 @@ class TestStateDtypeBF16:
 
     @pytest.mark.parametrize("args", STATE_BF16_PARAMS, ids=STATE_BF16_TEST_IDS)
     def test_state_bf16_matches_state_f32(self, args: PrefillArgs):
-        context_lens = _build_context_lens(
-            args.full_prompt_len, args.max_num_batched_tokens
-        )
+        context_lens = args.resolve_context_lens()
         k, _, _, w_c, u_c, g, h0_f32, cu, _ = _make_inputs(context_lens, args=args)
         h0_bf16 = h0_f32.to(torch.bfloat16)
 
@@ -1372,9 +1612,7 @@ class TestStateDtypeBF16:
         """``state_dtype`` kwarg controls final_state dtype when h0 is None."""
         if not args.output_final_state:
             pytest.skip("kwarg only meaningful when final_state is requested")
-        context_lens = _build_context_lens(
-            args.full_prompt_len, args.max_num_batched_tokens
-        )
+        context_lens = args.resolve_context_lens()
         k, _, _, w_c, u_c, g, _, cu, _ = _make_inputs(
             context_lens, args=args, with_initial_state=False
         )
@@ -1406,9 +1644,7 @@ class TestStateDtypeBF16:
     def test_state_dtype_conflict_raises(self):
         """Mismatched ``state_dtype`` and ``initial_state.dtype`` must raise."""
         args = STATE_BF16_PARAMS[0]
-        context_lens = _build_context_lens(
-            args.full_prompt_len, args.max_num_batched_tokens
-        )
+        context_lens = args.resolve_context_lens()
         k, _, _, w_c, u_c, g, h0, cu, _ = _make_inputs(context_lens, args=args)
         with pytest.raises(ValueError):
             chunk_gated_delta_rule_fwd_h_flydsl(
@@ -1425,9 +1661,7 @@ class TestStateDtypeBF16:
     def test_state_dtype_unsupported_raises(self):
         """Unsupported state dtypes must raise (e.g. fp16)."""
         args = STATE_BF16_PARAMS[0]
-        context_lens = _build_context_lens(
-            args.full_prompt_len, args.max_num_batched_tokens
-        )
+        context_lens = args.resolve_context_lens()
         k, _, _, w_c, u_c, g, _, cu, _ = _make_inputs(
             context_lens, args=args, with_initial_state=False
         )
@@ -1448,13 +1682,19 @@ _perf_results: list[dict] = []
 
 
 class TestPerformance:
-    """Kernel-only performance comparison: FlyDSL vs Triton opt_vk vs Triton opt3_kv."""
+    """Kernel-only performance comparison: FlyDSL vs Triton opt_vk vs Triton opt3_kv.
 
-    @pytest.mark.parametrize("args", PREFILL_PARAMS, ids=PREFILL_TEST_IDS)
+    Parametrizes over ``PERF_PARAMS`` (= ``PREFILL_PARAMS`` plus every
+    trace shape from ``ganyi_bench_k5_gdr_inline.py`` not already in
+    the representative subset, each tagged ``pytest.mark.slow``). The
+    slow trace shapes are skipped by default; pass ``--run-slow`` to
+    opt in. See ``aiter/ops/flydsl/conftest.py`` for the ``--run-slow``
+    flag and ``slow`` marker registration.
+    """
+
+    @pytest.mark.parametrize("args", PERF_PARAMS, ids=PERF_TEST_IDS)
     def test_perf_comparison(self, args: PrefillArgs):
-        context_lens = _build_context_lens(
-            args.full_prompt_len, args.max_num_batched_tokens
-        )
+        context_lens = args.resolve_context_lens()
         k, w_orig, u_orig, w_c, u_c, g, h0, cu, _ = _make_inputs(
             context_lens, args=args
         )
@@ -1470,19 +1710,14 @@ class TestPerformance:
         h0_triton_vk = (
             h0.float() if (h0 is not None and h0.dtype != torch.float32) else h0
         )
-        h0_kv = (
+
+        # triton_origin_opt uses a [K, V] hidden-state layout, so its h0
+        # is the VK reference h0 transposed on the last two dims.
+        h0_origin_kv = (
             h0_triton_vk.transpose(-2, -1).contiguous()
             if h0_triton_vk is not None
             else None
         )
-
-        # For triton_origin: needs [B, T, H, K] layout for w/u and [N, H, K, V] for h0.
-        # Origin kernel doesn't support GQA, so expand k from [B,T,Hg,K] to [B,T,H,K].
-        H = args.Hv // args.tp
-        Hg = args.Hk // args.tp
-        gqa_ratio = H // Hg
-        k_origin = k.repeat_interleave(gqa_ratio, dim=2) if gqa_ratio > 1 else k
-        h0_origin_kv = h0_kv  # already [N, H, K, V] from transpose above
 
         # K5 launch closures: each invokes the K5 host wrapper of its backend.
         def flydsl_launch():
@@ -1507,32 +1742,31 @@ class TestPerformance:
                 cu_seqlens=cu,
             )
 
-        def triton_opt3_launch():
-            chunk_gated_delta_rule_fwd_h_opt(
+        # vLLM upstream K5 (chunk_delta_h.chunk_gated_delta_rule_fwd_h). Uses
+        # the same vk hidden-state layout and same final_state dtype as the
+        # aiter ``opt_vk`` wrapper, but unlike ``opt_vk`` its host wrapper
+        # infers ``H = u.shape[-2]`` (T-major), so it requires the un-permuted
+        # ``w_orig`` / ``u_orig`` -- feeding the H-major ``w_c`` / ``u_c``
+        # would make vLLM compute ``H = T`` and try to allocate a
+        # terabyte-sized ``h``. vLLM supports GQA natively, so ``k`` is also
+        # passed un-expanded. We still feed the same h0_triton_vk (fp32) as
+        # ``triton_vk_launch`` because vk hidden-state layout is identical.
+        def vllm_launch():
+            chunk_gated_delta_rule_fwd_h_vllm(
                 k=k,
-                w=w_c,
-                u=u_c,
-                g=g,
-                initial_state=h0_kv,
-                output_final_state=args.output_final_state,
-                cu_seqlens=cu,
-            )
-
-        def triton_origin_launch():
-            chunk_gated_delta_rule_fwd_h(
-                k=k_origin,
                 w=w_orig,
                 u=u_orig,
                 g=g,
-                initial_state=h0_origin_kv,
+                initial_state=h0_triton_vk,
                 output_final_state=args.output_final_state,
                 cu_seqlens=cu,
             )
 
         def triton_origin_opt_launch():
             # GQA-aware (uses unexpanded k) BV=16 + exp2 variant of fwd_h
-            # from the standalone bench's new pipeline. Same hidden-state
-            # layout [K,V] as triton_origin, so reuses h0_origin_kv.
+            # from the standalone bench's new pipeline. Hidden state in
+            # [K,V] layout, so it needs h0_origin_kv (h0 transposed from
+            # the VK reference layout).
             chunk_gated_delta_rule_fwd_h_origin_opt(
                 k=k,
                 w=w_orig,
@@ -1545,32 +1779,28 @@ class TestPerformance:
 
         # Warmup FlyDSL once so its internal BV-autotune sweep does not
         # leak into the timed window. Triton's own ``triton.autotune`` is
-        # already absorbed by ``_bench_fn``'s NUM_WARMUP=5 prelude.
+        # already absorbed by ``_bench_fn``'s NUM_WARMUP=5 prelude, except
+        # for vLLM upstream's K5 -- its first call also runs a BV/warps/
+        # stages sweep and the 5-iter prelude is not always enough to
+        # converge the autotuner on long-T shapes. Pre-warm it once here
+        # for parity with FlyDSL so that ``us_vllm`` reflects steady-state
+        # kernel time, not the autotune sweep.
         flydsl_launch()
+        if _HAS_VLLM_K5:
+            vllm_launch()
         torch.cuda.synchronize()
 
-        us_triton_opt3 = _bench_fn(triton_opt3_launch)
         us_fly = _bench_fn(flydsl_launch)
         us_triton_vk = _bench_fn(triton_vk_launch)
-        us_triton_origin = _bench_fn(triton_origin_launch)
         us_triton_origin_opt = _bench_fn(triton_origin_opt_launch)
+        us_vllm = _bench_fn(vllm_launch) if _HAS_VLLM_K5 else float("nan")
 
         fly_vs_vk = us_triton_vk / us_fly if us_fly > 0 else float("inf")
-        fly_vs_kv = us_triton_opt3 / us_fly if us_fly > 0 else float("inf")
-        fly_vs_origin = us_triton_origin / us_fly if us_fly > 0 else float("inf")
         fly_vs_origin_opt = (
             us_triton_origin_opt / us_fly if us_fly > 0 else float("inf")
         )
-        vk_vs_origin = (
-            us_triton_origin / us_triton_vk if us_triton_vk > 0 else float("inf")
-        )
-        kv_vs_origin = (
-            us_triton_origin / us_triton_opt3 if us_triton_opt3 > 0 else float("inf")
-        )
-        opt_vs_origin = (
-            us_triton_origin / us_triton_origin_opt
-            if us_triton_origin_opt > 0
-            else float("inf")
+        fly_vs_vllm = (
+            us_vllm / us_fly if (us_fly > 0 and us_vllm == us_vllm) else float("nan")
         )
 
         _perf_results.append(
@@ -1588,16 +1818,11 @@ class TestPerformance:
                 "state": "bf16" if args.ssm_state_dtype == torch.bfloat16 else "fp32",
                 "FlyDSL_vk(us)": us_fly,
                 "Triton_vk(us)": us_triton_vk,
-                "Triton_kv(us)": us_triton_opt3,
-                "Triton_origin(us)": us_triton_origin,
                 "Triton_origin_opt(us)": us_triton_origin_opt,
+                "vLLM_vk(us)": us_vllm,
                 "flydsl_vs_vk": fly_vs_vk,
-                "flydsl_vs_kv": fly_vs_kv,
-                "flydsl_vs_origin": fly_vs_origin,
                 "flydsl_vs_origin_opt": fly_vs_origin_opt,
-                "vk_vs_origin": vk_vs_origin,
-                "kv_vs_origin": kv_vs_origin,
-                "opt_vs_origin": opt_vs_origin,
+                "flydsl_vs_vllm": fly_vs_vllm,
             }
         )
 
@@ -1619,16 +1844,11 @@ def _print_perf_table():
         ("fs", "final_st", 3),
         ("FlyDSL", "FlyDSL_vk(us)", 8),
         ("Tri_vk", "Triton_vk(us)", 8),
-        ("Tri_kv", "Triton_kv(us)", 8),
-        ("Tri_orig", "Triton_origin(us)", 9),
         ("Tri_orig_opt", "Triton_origin_opt(us)", 12),
+        ("vLLM", "vLLM_vk(us)", 8),
         ("fly/vk", "flydsl_vs_vk", 7),
-        ("fly/kv", "flydsl_vs_kv", 7),
-        ("fly/orig", "flydsl_vs_origin", 8),
         ("fly/o_opt", "flydsl_vs_origin_opt", 9),
-        ("vk/orig", "vk_vs_origin", 7),
-        ("kv/orig", "kv_vs_origin", 7),
-        ("o_opt/orig", "opt_vs_origin", 10),
+        ("fly/vllm", "flydsl_vs_vllm", 8),
     ]
     header = " | ".join(display.rjust(width) for display, _, width in cols)
     sep = "-+-".join("-" * width for _, _, width in cols)
@@ -1641,7 +1861,9 @@ def _print_perf_table():
             if isinstance(val, bool):
                 cells.append(("Y" if val else "N").rjust(width))
             elif isinstance(val, float):
-                if "_vs_" in key:
+                if val != val:  # NaN (e.g. vLLM column when vllm not installed)
+                    cells.append("-".rjust(width))
+                elif "_vs_" in key:
                     cells.append(f"{val:.2f}x".rjust(width))
                 else:
                     cells.append(f"{val:.1f}".rjust(width))
