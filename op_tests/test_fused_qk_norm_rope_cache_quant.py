@@ -1852,7 +1852,6 @@ def test_qk_norm_rope_cache_block_quant(
         decode2_total = batch_size * dtpb
         last_used_slot = int(chunk_slot_mapping[-1].item())
         decode2_page_base = (last_used_slot + page_size) // page_size * page_size
-        num_blocks * page_size
         pages_needed = batch_size * 2 + (decode2_page_base // page_size)
         assert (
             pages_needed <= num_blocks
@@ -2606,6 +2605,9 @@ if __name__ == "__main__":
     df = []
     # rope
     block_df = []
+    # partial rope: Qwen3.5-style has head_size=256 and rotary_dim=64
+    # GLM 4.7 has head_size=128 and rotary_dim=64
+    partial_rotary_configs = {256: 64, 128: 64, 64: 16}
 
     for is_neox_style in args.is_neox_styles:
         for num_token in args.token:
@@ -2651,6 +2653,27 @@ if __name__ == "__main__":
                                     max_positions=args.max_positions,
                                 )
                                 df.append(ret)
+                                partial_rotary_dim = partial_rotary_configs.get(
+                                    head_size
+                                )
+                                if partial_rotary_dim is not None:
+                                    assert partial_rotary_dim < head_size
+                                    ret = test_qk_norm_rope_cache_quant(
+                                        args.dtype,
+                                        num_token,
+                                        num_head,
+                                        num_kv_head,
+                                        num_kv_head,
+                                        head_size,
+                                        is_neox_style,
+                                        1e-6,
+                                        kv_cache_dtype,
+                                        args.num_blocks,
+                                        args.page_size,
+                                        max_positions=args.max_positions,
+                                        rotary_dim=partial_rotary_dim,
+                                    )
+                                    df.append(ret)
     df = pd.DataFrame(df)
     block_df = pd.DataFrame(block_df)
     if "per_head" in args.quant_type:
@@ -2724,39 +2747,6 @@ if __name__ == "__main__":
     df = pd.DataFrame(df)
     df_md = df.to_markdown(index=False)
     aiter.logger.info("qk_norm_rope_2way summary (markdown):\n%s", df_md)
-
-    # partial rotary tests (Qwen3.5-style: head_size=256, rotary_dim=64)
-    partial_rotary_configs = {256: 64, 128: 64, 64: 16}
-
-    partial_qk_df = []
-    for num_token in args.token:
-        for num_head, num_kv_head in args.head:
-            for head_size in args.head_sizes:
-                rotary_dim = partial_rotary_configs[head_size]
-                assert rotary_dim < head_size
-                for is_neox_style in args.is_neox_styles:
-                    ret = test_qk_norm_rope_cache_quant(
-                        args.dtype,
-                        num_token,
-                        num_head,
-                        num_kv_head,
-                        num_kv_head,
-                        head_size,
-                        is_neox_style,
-                        1e-6,
-                        "auto",
-                        args.num_blocks,
-                        args.page_size,
-                        max_positions=args.max_positions,
-                        rotary_dim=rotary_dim,
-                    )
-                    partial_qk_df.append(ret)
-    partial_qk_df = pd.DataFrame(partial_qk_df)
-    partial_qk_df_md = partial_qk_df.to_markdown(index=False)
-    aiter.logger.info(
-        "partial_rotary_qk_norm_rope_cache_quant summary (markdown):\n%s",
-        partial_qk_df_md,
-    )
 
     partial_pts_df = []
     for num_token in args.token:
