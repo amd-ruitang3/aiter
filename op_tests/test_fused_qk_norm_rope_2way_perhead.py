@@ -81,16 +81,18 @@ def main():
         B, T0, T1, Hq, Hk, D, is_interleaved, eps,
     )
 
-    # Microbench V quant: baseline vs per-(batch, head).
+    # Microbench V quant: baseline vs 2-way per-(batch, head).
     @perftest()
     def run_v_per_tensor(v):
         return aiter.per_tensor_quant(v, quant_dtype=torch.float8_e4m3fnuz)
     @perftest()
-    def run_v_perhead(v):
-        return aiter.v_per_head_fp8_quant(v)
-    v = torch.randn(B, T0 + T1, Hq, D, dtype=dtype, device=dev).contiguous()
+    def run_v_2way_perhead(v0, v1):
+        return aiter.v_2way_per_head_fp8_quant(v0, v1)
+    v0 = torch.randn(B, T0, Hq, D, dtype=dtype, device=dev).contiguous()
+    v1 = torch.randn(B, T1, Hq, D, dtype=dtype, device=dev).contiguous()
+    v = torch.cat([v0, v1], dim=1).contiguous()
     (_v_pt, _v_pt_s), t_vpt = run_v_per_tensor(v)
-    (_v_ph, _v_ph_s), t_vph = run_v_perhead(v)
+    (_v_ph, _v_ph_s), t_vph = run_v_2way_perhead(v0, v1)
 
     # Dequantize and compare against the bf16 reference (qb_bf16/kb_bf16 from the
     # already-correct baseline split pipeline).
@@ -122,8 +124,8 @@ def main():
 
     print("\n[perf — V quant only]")
     print(f"  per_tensor_quant (V)                : {t_vpt:8.2f} us")
-    print(f"  v_per_head_fp8_quant                : {t_vph:8.2f} us")
-    print(f"  perhead vs pertensor                : {(t_vph/max(t_vpt,1e-9) - 1)*100:+.2f}%")
+    print(f"  v_2way_per_head_fp8_quant           : {t_vph:8.2f} us")
+    print(f"  2way perhead vs pertensor           : {(t_vph/max(t_vpt,1e-9) - 1)*100:+.2f}%")
 
 
 if __name__ == "__main__":

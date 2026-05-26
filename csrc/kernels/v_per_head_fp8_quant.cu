@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: MIT
 // Standalone tiled per-head FP8 V quant, additive to /opt/aiter.
 //
-// Adds symbols:
-//   aiter::v_per_head_fp8_quant(at::Tensor& v)
+// Adds one public symbol:
 //   aiter::v_2way_per_head_fp8_quant(at::Tensor& v0, at::Tensor& v1)
-//   in  : v   bf16/half  [B, T, H, D=128]   contiguous
+//   in  : v0/v1 bf16/half [B, T0/T1, H, D=128] contiguous
 //   out : (v_fp8 e4m3fnuz [B, T, H, D], v_descale fp32 [B, H])
 //
 // Algorithm (3-pass for high CU occupancy on MI300):
@@ -230,63 +229,6 @@ __global__ void __launch_bounds__(256) v_2way_per_head_quant_tiled_kernel(
         }
         v_fp8_[out_off] = mrope_utils::fp8e4m3fnuz(val * inv);
     }
-}
-
-// ---------- host wrapper ----------
-std::tuple<at::Tensor, at::Tensor> v_per_head_fp8_quant(at::Tensor& v)
-{
-    TORCH_CHECK(v.is_contiguous(), "v must be contiguous");
-    TORCH_CHECK(v.dim() == 4, "v must be 4D [B, T, H, D]");
-    int64_t B = v.size(0);
-    int64_t T = v.size(1);
-    int64_t H = v.size(2);
-    int64_t D = v.size(3);
-    TORCH_CHECK(D == 128, "v_per_head_fp8_quant currently only supports head_size=128");
-
-    const at::hip::OptionalHIPGuardMasqueradingAsCUDA device_guard(device_of(v));
-    auto stream = c10::hip::getCurrentHIPStreamMasqueradingAsCUDA().stream();
-
-    at::Tensor v_fp8 =
-        at::empty({B, T, H, D}, v.options().dtype(at::ScalarType::Float8_e4m3fnuz));
-    at::Tensor v_descale = at::empty({B, H}, v.options().dtype(at::ScalarType::Float));
-    at::Tensor v_amax    = at::zeros({B, H}, v.options().dtype(at::ScalarType::Float));
-
-    constexpr int TILE_T    = 128;
-    constexpr int HEAD_SIZE = 128;
-    int num_tiles = (int)((T + TILE_T - 1) / TILE_T);
-    dim3 grid((unsigned)num_tiles, (unsigned)H, (unsigned)B);
-    dim3 block(256);
-
-    AT_DISPATCH_FLOATING_TYPES_AND2(
-        at::kBFloat16, at::kHalf, v.scalar_type(), "v_per_head_amax_tiled", [&] {
-            using T_ = KernelElementType<scalar_t>::type;
-            v_per_head_amax_tiled_kernel<T_, TILE_T, HEAD_SIZE>
-                <<<grid, block, 0, stream>>>(
-                    (T_*)v.data_ptr<scalar_t>(),
-                    (int)T,
-                    (int)H,
-                    v_amax.data_ptr<float>());
-        });
-
-    {
-        dim3 fg((unsigned)((H + 31) / 32), (unsigned)B);
-        dim3 fb(32);
-        v_amax_to_descale_kernel<<<fg, fb, 0, stream>>>(
-            v_amax.data_ptr<float>(), (int)H, v_descale.data_ptr<float>());
-    }
-
-    AT_DISPATCH_FLOATING_TYPES_AND2(
-        at::kBFloat16, at::kHalf, v.scalar_type(), "v_per_head_quant_tiled", [&] {
-            using T_ = KernelElementType<scalar_t>::type;
-            v_per_head_quant_tiled_kernel<T_, TILE_T, HEAD_SIZE>
-                <<<grid, block, 0, stream>>>(
-                    (T_*)v.data_ptr<scalar_t>(),
-                    (int)T,
-                    (int)H,
-                    (mrope_utils::fp8e4m3fnuz*)v_fp8.data_ptr(),
-                    v_descale.data_ptr<float>());
-        });
-    return {v_fp8, v_descale};
 }
 
 std::tuple<at::Tensor, at::Tensor> v_2way_per_head_fp8_quant(at::Tensor& v0,
