@@ -57,10 +57,25 @@ __all__ = [
 _compiled_kernels = {}
 _BV_CANDIDATES = [16, 32, 64]
 _DEFAULT_BV = 16
-_TUNED_FILE = "chunk_gdn_h_tuned.csv"
+# Tuned-BV tables loaded at runtime. Order matters when the same shape
+# key exists in multiple files: the last file wins. Drop a file in this
+# list if you want its rows ignored without renaming the CSV on disk.
+_TUNED_FILES = (
+    "chunk_gdn_h_tuned.csv",
+    "chunk_gdn_h_bench407_tuned.csv",
+)
 
 # (dtype_str, arch, K, V, BT, H, Hg, T_flat, N,
-#  use_g, use_gk, use_h0, store_fs, save_vn, is_varlen, wu_contig) -> {"BV": int}
+#  head_seqlen, mid_seqlen, tail_seqlen,
+#  use_g, use_gk, use_h0, store_fs, save_vn, is_varlen, wu_contig)
+#  -> {"BV": int}
+#
+# ``head_seqlen`` / ``mid_seqlen`` / ``tail_seqlen`` are structural
+# features of ``cu_seqlens`` that disambiguate shapes sharing the same
+# ``(T_flat, N)`` but with different per-segment length distributions.
+# CSV rows that pre-date these columns load them as 0 (the same value
+# the runtime caller passes when cu_seqlens is None or short enough to
+# have no "mid" segments).
 GDN_H_GLOBAL_CONFIG_MAP = None
 # Secondary index for the ``is_varlen=False`` nearest-T fallback. Keyed on the
 # full shape tuple but with ``T_flat`` removed; value is the list of
@@ -124,19 +139,26 @@ def _lookup_tuned_bv(
     save_vn,
     is_varlen,
     wu_contig,
+    head_seqlen=0,
+    mid_seqlen=0,
+    tail_seqlen=0,
 ):
     """Look up the best ``BV`` for this shape from the offline-tuned table.
 
-    Falls back to ``_DEFAULT_BV`` when no entry matches (with a one-time
-    per-shape warning). Mirrors the lookup-table pattern used by
-    ``aiter.ops.flydsl.linear_attention_kernels.get_default_kwargs``.
+    Lookup order:
+      1. Exact match on the full shape tuple (incl. head/mid/tail).
+      2. Nearest-T fallback for ``is_varlen=False`` shapes.
+      3. Heuristic rule-based BV with a one-time warning.
     """
     global GDN_H_GLOBAL_CONFIG_MAP, GDN_H_T_INDEX
     if GDN_H_GLOBAL_CONFIG_MAP is None:
         _dict = {}
         _t_index = {}
-        fname = os.path.join(Path(__file__).resolve().parent, _TUNED_FILE)
-        if os.path.exists(fname):
+        base_dir = Path(__file__).resolve().parent
+        for tuned_file in _TUNED_FILES:
+            fname = os.path.join(base_dir, tuned_file)
+            if not os.path.exists(fname):
+                continue
             with open(fname, "r", encoding="utf-8") as f:
                 for row in csv.DictReader(f):
                     # Coerce CSV string fields to native Python types so the
@@ -158,8 +180,15 @@ def _lookup_tuned_bv(
                     obj_save_vn = row["save_vn"] == "True"
                     obj_is_varlen = row["is_varlen"] == "True"
                     obj_wu_contig = row["wu_contig"] == "True"
+                    # head/mid/tail were added after the initial schema.
+                    # Old rows that lack them load as 0 -- matching the
+                    # runtime fallback when cu_seqlens has fewer than 3
+                    # segments (so no "mid") or non-uniform mid segments.
+                    obj_head = int(row.get("head_seqlen", "0") or "0")
+                    obj_mid = int(row.get("mid_seqlen", "0") or "0")
+                    obj_tail = int(row.get("tail_seqlen", "0") or "0")
                     cfg = {"BV": int(row["BV"])}
-                    key = (
+                    full_key = (
                         obj_dtype,
                         obj_arch,
                         obj_K,
@@ -169,6 +198,9 @@ def _lookup_tuned_bv(
                         obj_Hg,
                         obj_T_flat,
                         obj_N,
+                        obj_head,
+                        obj_mid,
+                        obj_tail,
                         obj_use_g,
                         obj_use_gk,
                         obj_use_h0,
@@ -177,31 +209,33 @@ def _lookup_tuned_bv(
                         obj_is_varlen,
                         obj_wu_contig,
                     )
-                    _dict[key] = cfg
-                    sk = _gdn_h_shape_key_no_T(
-                        obj_dtype,
-                        obj_arch,
-                        obj_K,
-                        obj_V,
-                        obj_BT,
-                        obj_H,
-                        obj_Hg,
-                        obj_N,
-                        obj_use_g,
-                        obj_use_gk,
-                        obj_use_h0,
-                        obj_store_fs,
-                        obj_save_vn,
-                        obj_is_varlen,
-                        obj_wu_contig,
-                    )
-                    _t_index.setdefault(sk, []).append((obj_T_flat, cfg))
+                    is_new_key = full_key not in _dict
+                    _dict[full_key] = cfg
+                    if is_new_key:
+                        sk = _gdn_h_shape_key_no_T(
+                            obj_dtype,
+                            obj_arch,
+                            obj_K,
+                            obj_V,
+                            obj_BT,
+                            obj_H,
+                            obj_Hg,
+                            obj_N,
+                            obj_use_g,
+                            obj_use_gk,
+                            obj_use_h0,
+                            obj_store_fs,
+                            obj_save_vn,
+                            obj_is_varlen,
+                            obj_wu_contig,
+                        )
+                        _t_index.setdefault(sk, []).append((obj_T_flat, cfg))
         for _v in _t_index.values():
             _v.sort(key=lambda x: x[0])
         GDN_H_GLOBAL_CONFIG_MAP = _dict
         GDN_H_T_INDEX = _t_index
 
-    key = (
+    full_key = (
         dtype_str,
         GDN_H_GPU_ARCH,
         K,
@@ -211,6 +245,9 @@ def _lookup_tuned_bv(
         Hg,
         T_flat,
         N,
+        head_seqlen,
+        mid_seqlen,
+        tail_seqlen,
         use_g,
         use_gk,
         use_h0,
@@ -219,7 +256,7 @@ def _lookup_tuned_bv(
         is_varlen,
         wu_contig,
     )
-    cfg = GDN_H_GLOBAL_CONFIG_MAP.get(key, None)
+    cfg = GDN_H_GLOBAL_CONFIG_MAP.get(full_key, None)
     if cfg is not None:
         BV = int(cfg["BV"])
         if BV in _BV_CANDIDATES and BV <= V and V % BV == 0:
@@ -277,13 +314,13 @@ def _lookup_tuned_bv(
     # empirical best for 18/20 sweeped shapes; the remaining 2 are within
     # ~5%.
     rule_bv = _heuristic_bv(H=H, V=V, T_flat=T_flat, N=N, is_varlen=is_varlen)
-    if key not in _GDN_H_FALLBACK_WARNED:
+    if full_key not in _GDN_H_FALLBACK_WARNED:
         print(
-            f"[K5 lookup] no tuned BV for {key}, "
+            f"[K5 lookup] no tuned BV for {full_key}, "
             f"using rule-based BV={rule_bv}. "
-            f"Run the offline tuner to add this shape to {_TUNED_FILE}."
+            f"Run the offline tuner to add this shape to one of {_TUNED_FILES}."
         )
-        _GDN_H_FALLBACK_WARNED.add(key)
+        _GDN_H_FALLBACK_WARNED.add(full_key)
     return rule_bv
 
 
@@ -564,10 +601,36 @@ def chunk_gated_delta_rule_fwd_h_flydsl(
 
     if cu_seqlens is None:
         N, NT, chunk_offsets = B, triton.cdiv(T, BT), None
+        head_seqlen_lookup = 0
+        mid_seqlen_lookup = 0
+        tail_seqlen_lookup = 0
     else:
         N = len(cu_seqlens) - 1
         lens = cu_seqlens[1:] - cu_seqlens[:-1]
-        NT = sum(triton.cdiv(int(seq_len), BT) for seq_len in lens.tolist())
+        lens_list = lens.tolist()
+        NT = sum(triton.cdiv(int(seq_len), BT) for seq_len in lens_list)
+        # Structural features of the cu_seqlens length distribution for
+        # BV lookup; computed identically by sweep_flydsl_k5_bv.py so
+        # the runtime key matches the tuned table's key.
+        if not lens_list:
+            head_seqlen_lookup = 0
+            mid_seqlen_lookup = 0
+            tail_seqlen_lookup = 0
+        elif len(lens_list) == 1:
+            head_seqlen_lookup = int(lens_list[0])
+            mid_seqlen_lookup = 0
+            tail_seqlen_lookup = 0
+        elif len(lens_list) == 2:
+            head_seqlen_lookup = int(lens_list[0])
+            mid_seqlen_lookup = 0
+            tail_seqlen_lookup = int(lens_list[1])
+        else:
+            mids = lens_list[1:-1]
+            head_seqlen_lookup = int(lens_list[0])
+            tail_seqlen_lookup = int(lens_list[-1])
+            mid_seqlen_lookup = (
+                int(mids[0]) if all(m == mids[0] for m in mids) else 0
+            )
         chunk_offsets = (
             torch.cat(
                 [
@@ -624,6 +687,9 @@ def chunk_gated_delta_rule_fwd_h_flydsl(
         save_vn=bool(save_new_value),
         is_varlen=is_varlen,
         wu_contig=wu_contiguous,
+        head_seqlen=head_seqlen_lookup,
+        mid_seqlen=mid_seqlen_lookup,
+        tail_seqlen=tail_seqlen_lookup,
     )
 
     launch_fn = _get_or_compile(

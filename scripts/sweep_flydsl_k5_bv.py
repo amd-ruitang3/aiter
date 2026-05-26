@@ -90,6 +90,39 @@ def _runtime_T_flat_N(args) -> tuple[int, int]:
     return args.max_num_batched_tokens, N_val
 
 
+def _runtime_head_mid_tail(args) -> tuple[int, int, int]:
+    """Return (head, mid, tail) the way the kernel sees them.
+
+    Mirrors the same head/mid/tail derivation the host wrapper applies
+    on ``cu_seqlens`` so the sweep's lookup key matches the runtime
+    caller's.
+    """
+    if args.context_lens is not None:
+        lens = list(args.context_lens)
+    elif args.is_varlen:
+        # _build_context_lens(full_prompt_len, max_num_batched_tokens):
+        # ceil(mnbt/full_len) equal segments, last one possibly short.
+        full_len = args.full_prompt_len
+        rem = args.max_num_batched_tokens
+        lens = []
+        while rem > 0:
+            cur = min(full_len, rem)
+            lens.append(cur)
+            rem -= cur
+    else:
+        return 0, 0, 0
+    n = len(lens)
+    if n == 0:
+        return 0, 0, 0
+    if n == 1:
+        return int(lens[0]), 0, 0
+    if n == 2:
+        return int(lens[0]), 0, int(lens[1])
+    mids = lens[1:-1]
+    mid = int(mids[0]) if all(m == mids[0] for m in mids) else 0
+    return int(lens[0]), mid, int(lens[-1])
+
+
 def _orig_tuned_bv(args) -> int:
     """Look up the existing tuned BV for this shape (no patch). Used
     purely for the "csv BV" column in the output table.
@@ -97,6 +130,7 @@ def _orig_tuned_bv(args) -> int:
     H = args.Hv // args.tp
     Hg = args.Hk // args.tp
     T_flat, N_val = _runtime_T_flat_N(args)
+    head, mid, tail = _runtime_head_mid_tail(args)
     return _lap._lookup_tuned_bv(
         dtype_str=str(args.dtype),
         K=args.K,
@@ -113,6 +147,9 @@ def _orig_tuned_bv(args) -> int:
         save_vn=True,
         is_varlen=args.is_varlen,
         wu_contig=True,
+        head_seqlen=head,
+        mid_seqlen=mid,
+        tail_seqlen=tail,
     )
 
 
@@ -153,6 +190,7 @@ def _csv_row_for(args, best_bv: int, best_us: float) -> dict:
     H = args.Hv // args.tp
     Hg = args.Hk // args.tp
     T_flat, N_val = _runtime_T_flat_N(args)
+    head, mid, tail = _runtime_head_mid_tail(args)
     return {
         "arch": "gfx950",
         "dtype": str(args.dtype),
@@ -163,6 +201,9 @@ def _csv_row_for(args, best_bv: int, best_us: float) -> dict:
         "Hg": Hg,
         "T_flat": T_flat,
         "N": N_val,
+        "head_seqlen": head,
+        "mid_seqlen": mid,
+        "tail_seqlen": tail,
         "use_g": "True",
         "use_gk": "False",
         "use_h0": "True",
@@ -182,24 +223,42 @@ def main():
     parser.add_argument(
         "--include-trace",
         action="store_true",
-        help="also sweep the 396 slow-marked trace shapes (full PERF_PARAMS coverage)",
+        help="also sweep the slow-marked trace shapes if any (full PERF_PARAMS coverage)",
+    )
+    parser.add_argument(
+        "--only-bench407",
+        action="store_true",
+        help="only sweep the 333 bench407 shapes (model_name=Qwen3.5-prefill-bench407); "
+        "implies --include-trace is unused. Pairs naturally with "
+        "--out-csv chunk_gdn_h_bench407_tuned.csv.",
     )
     parser.add_argument(
         "--out-csv",
         type=str,
         default=None,
-        help="write tuned-BV CSV rows to this path (overwrites). Merge "
-        "into aiter/ops/flydsl/chunk_gdn_h_tuned.csv to deploy.",
+        help="write tuned-BV CSV rows to this path (overwrites). Drop into "
+        "aiter/ops/flydsl/ as either chunk_gdn_h_tuned.csv or "
+        "chunk_gdn_h_bench407_tuned.csv to deploy.",
     )
     cli_args = parser.parse_args()
 
-    if cli_args.include_trace:
+    if cli_args.only_bench407:
+        params = [
+            _unwrap(p) for p in PERF_PARAMS
+            if _unwrap(p).model_name == "Qwen3.5-prefill-bench407"
+        ]
+        print(f"Coverage: bench407 only ({len(params)} shapes)")
+    elif cli_args.include_trace:
         params = [_unwrap(p) for p in PERF_PARAMS]
         print(f"Coverage: full PERF_PARAMS ({len(params)} shapes)")
     else:
-        params = list(PREFILL_PARAMS)
-        print(f"Coverage: PREFILL_PARAMS only ({len(params)} shapes; pass "
-              f"--include-trace for the full 427-shape sweep)")
+        params = [
+            p for p in PREFILL_PARAMS
+            if p.model_name != "Qwen3.5-prefill-bench407"
+        ]
+        print(f"Coverage: PREFILL_PARAMS without bench407 ({len(params)} shapes; "
+              f"pass --only-bench407 to sweep just bench407, or "
+              f"--include-trace for full PERF_PARAMS coverage)")
 
     candidate_bvs = (16, 32, 64)
     print(f"NUM_WARMUP={NUM_WARMUP} NUM_ITERS={NUM_ITERS}")
@@ -267,14 +326,15 @@ def main():
     if cli_args.out_csv:
         out_rows = [_csv_row_for(a, best_bv, best_us)
                     for (a, _, _, _, best_bv, best_us) in results]
-        # Dedupe by the 16-tuple lookup key (drop ``duration``/``BV``).
-        # When two PrefillArgs map to the same key, keep the row with
-        # the lowest duration (tiebreak: first occurrence).
+        # Dedupe by the lookup key (drops ``duration``/``BV``). When
+        # two PrefillArgs map to the same key, keep the row with the
+        # lowest duration (tiebreak: first occurrence).
         seen = {}
         for r in out_rows:
             key = (
                 r["arch"], r["dtype"], r["K"], r["V"], r["BT"],
                 r["H"], r["Hg"], r["T_flat"], r["N"],
+                r["head_seqlen"], r["mid_seqlen"], r["tail_seqlen"],
                 r["use_g"], r["use_gk"], r["use_h0"],
                 r["store_fs"], r["save_vn"], r["is_varlen"], r["wu_contig"],
             )

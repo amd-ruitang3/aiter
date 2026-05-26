@@ -32,8 +32,6 @@ try:
         chunk_gated_delta_rule_fwd_h_flydsl,
     )
     from aiter.ops.triton._triton_kernels.gated_delta_rule.prefill.chunk_delta_h import (
-        chunk_gated_delta_rule_fwd_h,
-        chunk_gated_delta_rule_fwd_h_opt,
         chunk_gated_delta_rule_fwd_h_opt_vk,
     )
 except ImportError as exc:
@@ -53,353 +51,6 @@ except Exception:
     _HAS_VLLM_K5 = False
 
 torch.set_default_device("cuda")
-
-
-# -- triton_origin_opt: BV=16 + exp2 variant of fwd_h --------------------
-#
-# Inlined from the (now-deleted) standalone benchmark script
-# ``0423_gdr_prefill_bench_standalone.py``. Launches the same recurrence
-# kernel as the existing ``chunk_gated_delta_rule_fwd_h`` (``triton_origin``
-# in this file), but with two changes that the standalone bench's new
-# pipeline applies on top of the original RTP config:
-#
-#   - BV = 16 (was 32): smaller V-tile -> more (V/BV) blocks per (B*H)
-#     program-id pair -> better occupancy on MI355X.
-#   - USE_EXP2 = True (was False): emits a single ``v_exp_f32`` per
-#     gate evaluation instead of the ``v_log + v_mul + v_exp`` chain that
-#     ``tl.exp`` lowers to.
-#
-# Because USE_EXP2 expects gates pre-scaled by ``1/ln(2)``, the wrapper
-# multiplies the supplied ``g`` (already a per-chunk cumsum, as produced
-# by ``_make_inputs``) by RCP_LN2 before launching. That scale step is
-# excluded from the K5 kernel time -- we time only the kernel itself, in
-# line with how the other K5 wrappers in this file are benchmarked.
-#
-# The kernel itself is wrapped in a ``triton.autotune`` sweep over
-# (BV, num_warps, num_stages); the standalone version pinned BV=16
-# only, but exposing the sweep here matches what aiter's own
-# ``chunk_gated_delta_rule_fwd_kernel_h_blockdim64`` does internally
-# and lets each shape pick its own best config on first run.
-
-_RCP_LN2 = 1.0 / 0.6931471805599453
-
-_exp = tl.exp
-_exp2 = tl.math.exp2
-
-
-# Decorator stack mirrors FLA's K5 kernels (Heuristics outer, Autotune
-# inner) so that Triton 3.x writes the sweep result to its persistent
-# autotune cache (`~/.triton/autotune`) via ``cache_results=True``. After
-# the first run each (H, K, V, BT, IS_VARLEN) key is served from disk and
-# subsequent runs no longer launch the full BV/warps/stages sweep -- the
-# rocprof kernel-stats CSV then reports the same ~56 calls as the other
-# K5 kernels, instead of the 9000+ that an un-cached sweep produces.
-#
-# ``Hg`` is intentionally excluded from ``key``: it only affects host-side
-# address arithmetic (``H // Hg`` divisor for the K block-ptr), not the
-# compiled binary or tile shape, so adding it would just multiply the
-# number of unique keys and force redundant sweeps.
-@triton.heuristics(
-    {
-        "USE_G": lambda args: args["g"] is not None,
-        "USE_GK": lambda args: args["gk"] is not None,
-        "USE_INITIAL_STATE": lambda args: args["h0"] is not None,
-        "STORE_FINAL_STATE": lambda args: args["ht"] is not None,
-        "SAVE_NEW_VALUE": lambda args: args["v_new"] is not None,
-        "IS_VARLEN": lambda args: args["cu_seqlens"] is not None,
-    }
-)
-@triton.autotune(
-    configs=[
-        triton.Config({"BV": BV}, num_warps=num_warps, num_stages=num_stages)
-        for BV in (16, 32, 64)
-        for num_warps in (2, 4)
-        for num_stages in (2, 3)
-    ],
-    key=["H", "K", "V", "BT", "IS_VARLEN"],
-    cache_results=True,
-)
-@triton.jit(do_not_specialize=["T"])
-def chunk_gated_delta_rule_fwd_kernel_h_origin_opt(
-    k,
-    v,
-    w,
-    v_new,
-    g,
-    gk,
-    h,
-    h0,
-    ht,
-    cu_seqlens,
-    chunk_offsets,
-    T,
-    H: tl.constexpr,
-    Hg: tl.constexpr,
-    K: tl.constexpr,
-    V: tl.constexpr,
-    BT: tl.constexpr,
-    BV: tl.constexpr,
-    USE_G: tl.constexpr,
-    USE_GK: tl.constexpr,
-    USE_INITIAL_STATE: tl.constexpr,
-    STORE_FINAL_STATE: tl.constexpr,
-    SAVE_NEW_VALUE: tl.constexpr,
-    USE_EXP2: tl.constexpr,
-    IS_VARLEN: tl.constexpr,
-):
-    i_v, i_nh = tl.program_id(0), tl.program_id(1)
-    i_n, i_h = i_nh // H, i_nh % H
-    if IS_VARLEN:
-        bos, eos = tl.load(cu_seqlens + i_n).to(tl.int32), tl.load(
-            cu_seqlens + i_n + 1
-        ).to(tl.int32)
-        T = eos - bos
-        NT = tl.cdiv(T, BT)
-        boh = tl.load(chunk_offsets + i_n).to(tl.int32)
-    else:
-        bos, eos = i_n * T, i_n * T + T
-        NT = tl.cdiv(T, BT)
-        boh = i_n * NT
-
-    b_h1 = tl.zeros([64, BV], dtype=tl.float32)
-    if K > 64:
-        b_h2 = tl.zeros([64, BV], dtype=tl.float32)
-    if K > 128:
-        b_h3 = tl.zeros([64, BV], dtype=tl.float32)
-    if K > 192:
-        b_h4 = tl.zeros([64, BV], dtype=tl.float32)
-
-    h += ((boh * H + i_h) * K * V).to(tl.int64)
-    v += ((bos * H + i_h) * V).to(tl.int64)
-    k += ((bos * Hg + i_h // (H // Hg)) * K).to(tl.int64)
-    w += ((bos * H + i_h) * K).to(tl.int64)
-    if SAVE_NEW_VALUE:
-        v_new += ((bos * H + i_h) * V).to(tl.int64)
-    stride_v = H * V
-    stride_h = H * K * V
-    stride_k = Hg * K
-    stride_w = H * K
-    if USE_INITIAL_STATE:
-        h0 = h0 + i_nh * K * V
-    if STORE_FINAL_STATE:
-        ht = ht + i_nh * K * V
-
-    if USE_INITIAL_STATE:
-        p_h0_1 = tl.make_block_ptr(h0, (K, V), (V, 1), (0, i_v * BV), (64, BV), (1, 0))
-        b_h1 += tl.load(p_h0_1, boundary_check=(0, 1)).to(tl.float32)
-        if K > 64:
-            p_h0_2 = tl.make_block_ptr(
-                h0, (K, V), (V, 1), (64, i_v * BV), (64, BV), (1, 0)
-            )
-            b_h2 += tl.load(p_h0_2, boundary_check=(0, 1)).to(tl.float32)
-        if K > 128:
-            p_h0_3 = tl.make_block_ptr(
-                h0, (K, V), (V, 1), (128, i_v * BV), (64, BV), (1, 0)
-            )
-            b_h3 += tl.load(p_h0_3, boundary_check=(0, 1)).to(tl.float32)
-        if K > 192:
-            p_h0_4 = tl.make_block_ptr(
-                h0, (K, V), (V, 1), (192, i_v * BV), (64, BV), (1, 0)
-            )
-            b_h4 += tl.load(p_h0_4, boundary_check=(0, 1)).to(tl.float32)
-
-    for i_t in range(NT):
-        p_h1 = tl.make_block_ptr(
-            h + i_t * stride_h, (K, V), (V, 1), (0, i_v * BV), (64, BV), (1, 0)
-        )
-        tl.store(p_h1, b_h1.to(p_h1.dtype.element_ty), boundary_check=(0, 1))
-        if K > 64:
-            p_h2 = tl.make_block_ptr(
-                h + i_t * stride_h, (K, V), (V, 1), (64, i_v * BV), (64, BV), (1, 0)
-            )
-            tl.store(p_h2, b_h2.to(p_h2.dtype.element_ty), boundary_check=(0, 1))
-        if K > 128:
-            p_h3 = tl.make_block_ptr(
-                h + i_t * stride_h, (K, V), (V, 1), (128, i_v * BV), (64, BV), (1, 0)
-            )
-            tl.store(p_h3, b_h3.to(p_h3.dtype.element_ty), boundary_check=(0, 1))
-        if K > 192:
-            p_h4 = tl.make_block_ptr(
-                h + i_t * stride_h, (K, V), (V, 1), (192, i_v * BV), (64, BV), (1, 0)
-            )
-            tl.store(p_h4, b_h4.to(p_h4.dtype.element_ty), boundary_check=(0, 1))
-
-        p_w = tl.make_block_ptr(
-            w, (T, K), (stride_w, 1), (i_t * BT, 0), (BT, 64), (1, 0)
-        )
-        b_w = tl.load(p_w, boundary_check=(0, 1))
-        b_v = tl.dot(b_w, b_h1.to(b_w.dtype))
-        if K > 64:
-            p_w = tl.make_block_ptr(
-                w, (T, K), (stride_w, 1), (i_t * BT, 64), (BT, 64), (1, 0)
-            )
-            b_w = tl.load(p_w, boundary_check=(0, 1))
-            b_v += tl.dot(b_w, b_h2.to(b_w.dtype))
-        if K > 128:
-            p_w = tl.make_block_ptr(
-                w, (T, K), (stride_w, 1), (i_t * BT, 128), (BT, 64), (1, 0)
-            )
-            b_w = tl.load(p_w, boundary_check=(0, 1))
-            b_v += tl.dot(b_w, b_h3.to(b_w.dtype))
-        if K > 192:
-            p_w = tl.make_block_ptr(
-                w, (T, K), (stride_w, 1), (i_t * BT, 192), (BT, 64), (1, 0)
-            )
-            b_w = tl.load(p_w, boundary_check=(0, 1))
-            b_v += tl.dot(b_w, b_h4.to(b_w.dtype))
-        p_v = tl.make_block_ptr(
-            v, (T, V), (stride_v, 1), (i_t * BT, i_v * BV), (BT, BV), (1, 0)
-        )
-        b_v = tl.load(p_v, boundary_check=(0, 1)) - b_v
-
-        if SAVE_NEW_VALUE:
-            p_v2 = tl.make_block_ptr(
-                v_new, (T, V), (stride_v, 1), (i_t * BT, i_v * BV), (BT, BV), (1, 0)
-            )
-            tl.store(p_v2, b_v.to(p_v2.dtype.element_ty), boundary_check=(0, 1))
-
-        last_idx = min((i_t + 1) * BT, T) - 1
-        if USE_G:
-            m_t = (i_t * BT + tl.arange(0, BT)) < T
-            b_g_last = tl.load(g + (bos * H + last_idx * H + i_h).to(tl.int64)).to(
-                tl.float32
-            )
-            p_g = tl.make_block_ptr(
-                g + bos * H + i_h, (T,), (H,), (i_t * BT,), (BT,), (0,)
-            )
-            b_g = tl.load(p_g, boundary_check=(0,)).to(tl.float32)
-            if USE_EXP2:
-                b_v = b_v * tl.where(m_t, _exp2(b_g_last - b_g), 0)[:, None]
-                b_g_last = _exp2(b_g_last)
-            else:
-                b_v = b_v * tl.where(m_t, _exp(b_g_last - b_g), 0)[:, None]
-                b_g_last = _exp(b_g_last)
-            b_h1 = b_h1 * b_g_last
-            if K > 64:
-                b_h2 = b_h2 * b_g_last
-            if K > 128:
-                b_h3 = b_h3 * b_g_last
-            if K > 192:
-                b_h4 = b_h4 * b_g_last
-
-        b_v = b_v.to(k.dtype.element_ty)
-        p_k = tl.make_block_ptr(
-            k, (K, T), (1, stride_k), (0, i_t * BT), (64, BT), (0, 1)
-        )
-        b_k = tl.load(p_k, boundary_check=(0, 1))
-        b_h1 += tl.dot(b_k, b_v)
-        if K > 64:
-            p_k = tl.make_block_ptr(
-                k, (K, T), (1, stride_k), (64, i_t * BT), (64, BT), (0, 1)
-            )
-            b_k = tl.load(p_k, boundary_check=(0, 1))
-            b_h2 += tl.dot(b_k, b_v)
-        if K > 128:
-            p_k = tl.make_block_ptr(
-                k, (K, T), (1, stride_k), (128, i_t * BT), (64, BT), (0, 1)
-            )
-            b_k = tl.load(p_k, boundary_check=(0, 1))
-            b_h3 += tl.dot(b_k, b_v)
-        if K > 192:
-            p_k = tl.make_block_ptr(
-                k, (K, T), (1, stride_k), (192, i_t * BT), (64, BT), (0, 1)
-            )
-            b_k = tl.load(p_k, boundary_check=(0, 1))
-            b_h4 += tl.dot(b_k, b_v)
-
-    if STORE_FINAL_STATE:
-        p_ht = tl.make_block_ptr(ht, (K, V), (V, 1), (0, i_v * BV), (64, BV), (1, 0))
-        tl.store(p_ht, b_h1.to(p_ht.dtype.element_ty), boundary_check=(0, 1))
-        if K > 64:
-            p_ht = tl.make_block_ptr(
-                ht, (K, V), (V, 1), (64, i_v * BV), (64, BV), (1, 0)
-            )
-            tl.store(p_ht, b_h2.to(p_ht.dtype.element_ty), boundary_check=(0, 1))
-
-
-_TRITON_ORIGIN_OPT_KERNEL = chunk_gated_delta_rule_fwd_kernel_h_origin_opt
-
-
-def chunk_gated_delta_rule_fwd_h_origin_opt(
-    k,
-    w,
-    u,
-    g=None,
-    initial_state=None,
-    output_final_state=False,
-    cu_seqlens=None,
-):
-    """``triton_origin_opt`` K5: USE_EXP2 + autotuned BV/warps/stages variant.
-
-    Mirrors the standalone bench's ``fwd_h`` host wrapper but adds a
-    Triton autotune sweep over ``BV ? {16, 32, 64}``, ``num_warps ?
-    {2, 4}``, ``num_stages ? {1, 2, 3}``. Keyed on ``(H, Hg, K, V, BT,
-    IS_VARLEN)`` so each shape picks its own best config on first run.
-
-    Inputs use the GQA layout from PREFILL_PARAMS unchanged -- since this
-    K5 kernel accepts ``Hg`` directly, no ``repeat_interleave`` is needed
-    (unlike the original ``chunk_gated_delta_rule_fwd_h``, which is
-    MHA-only).
-
-    NOTE: The RCP_LN2 scale required by USE_EXP2=True is applied here so
-    that callers can pass the same per-chunk-cumsum ``g`` as the other
-    K5 wrappers. This scale is a cheap elementwise multiply and is
-    excluded from the kernel-time measurement when ``_bench_fn`` profiles
-    only the kernel launch.
-    """
-    import triton as _triton
-
-    B, T, Hg, K = k.shape
-    V = u.shape[-1]
-    H = u.shape[-2]
-    BT = 64
-    if cu_seqlens is None:
-        N, NT, chunk_offsets = B, _triton.cdiv(T, BT), None
-    else:
-        from aiter.ops.triton._triton_kernels.gated_delta_rule.prefill.chunk_delta_h import (
-            prepare_chunk_indices,
-            prepare_chunk_offsets,
-        )
-
-        chunk_indices = prepare_chunk_indices(cu_seqlens, BT)
-        N = len(cu_seqlens) - 1
-        NT = len(chunk_indices)
-        chunk_offsets = prepare_chunk_offsets(cu_seqlens, BT)
-
-    h = k.new_empty(B, NT, H, K, V)
-    v_new = torch.empty_like(u)
-    final_state = (
-        k.new_empty(N, H, K, V, dtype=torch.float32) if output_final_state else None
-    )
-
-    # USE_EXP2=True expects gates pre-scaled by 1/ln(2). Cheap elementwise
-    # op; excluded from kernel time when profiled via torch.profiler.
-    g_scaled = g * _RCP_LN2 if g is not None else None
-
-    def grid(meta):
-        return (_triton.cdiv(V, meta["BV"]), N * H)
-
-    _TRITON_ORIGIN_OPT_KERNEL[grid](
-        k=k,
-        v=u,
-        w=w,
-        v_new=v_new,
-        g=g_scaled,
-        gk=None,
-        h=h,
-        h0=initial_state,
-        ht=final_state,
-        cu_seqlens=cu_seqlens,
-        chunk_offsets=chunk_offsets,
-        T=T,
-        H=H,
-        Hg=Hg,
-        K=K,
-        V=V,
-        BT=BT,
-        USE_EXP2=True,
-    )
-    return h, v_new, final_state
 
 
 # -- Global test configuration ------------------------------------------
@@ -597,237 +248,75 @@ _PREFILL_GROUPS = [
         tps=[4, 8],
         full_prompt_lens=[1024, 2048, 4096, 8192],
     ),
+    PrefillGroup(
+        model_name="bench333-varlen",
+        Hv=64,
+        tps=[1],
+        full_prompt_lens=[5000],
+    ),
 ]
 
 PREFILL_PARAMS = expand_groups(_PREFILL_GROUPS)
 
 
-# -- Trace-derived parametrization --------------------------------------
+# -- bench_407 prefill shapes -------------------------------------------
 #
-# Pull the 407 unique ``(T, cu_seqlens)`` shapes embedded in
-# ``ganyi_bench_k5_gdr_inline.py`` (extracted from
-# ``prefill_gdr.log`` -- 28,152 prefill GDN calls under
-# Qwen3-Next-80B-A3B-Instruct-FP8, TP=1) and turn each one into a
-# ``PrefillArgs`` whose ``context_lens`` field carries the ragged
-# layout verbatim.
-#
-# Two subsets are exposed:
-#
-#   * ``TRACE_REPRESENTATIVE_PARAMS`` -- ~10 shapes covering the
-#     high-impact regions of the trace plus 1-2 regression sentinels
-#     (FlyDSL-K5's known weak point). Always parametrized so the perf
-#     test catches obvious regressions in CI.
-#
-#   * ``TRACE_FULL_PARAMS`` -- all 407 shapes. Only attached to
-#     ``PREFILL_PARAMS`` when ``--run-slow`` is passed (see conftest
-#     hook ``pytest_collection_modifyitems`` at the bottom of this
-#     file). Skipped by default so default ``pytest`` runs stay fast.
-#
-# Bench-script path is resolved relative to the aiter repo root so the
-# logic still works after ``pip install -e``: it walks up from this
-# test file to ``/workspace`` and looks for the bench script under
-# ``flydsl_k5_basic_info_0520/``. If the script is missing (e.g.
-# someone runs the tests outside this dev tree), we silently produce
-# an empty trace param list so the existing PREFILL_PARAMS tests
-# still run.
-import hashlib as _hashlib
-import os as _os
+# Append every shape from ``bench_407_prefill_only.csv`` (333 unique
+# prefill shapes extracted from a Qwen3-Next prefill_gdr trace,
+# decode-only segments stripped, duplicates merged with summed
+# ``log_count``). Each row maps to one ``PrefillArgs`` that drives the
+# varlen + final-state K5 path under the trace's head-dim choice
+# (K=128, V=128, Hk=16, Hv=32, tp=1, BT=64, bf16 weights, f32 SSM state).
+import csv as _bench407_csv
+import os as _bench407_os
 
 
-_TRACE_HEAD_DIMS = dict(
-    K=128, V=128, Hk=16, Hv=32, tp=1, BT=64,
-    is_varlen=True, output_final_state=True,
-    ssm_state_dtype=torch.float32,
+_BENCH407_CSV = _bench407_os.path.join(
+    _bench407_os.path.dirname(_bench407_os.path.abspath(__file__)),
+    "bench_407_prefill_only.csv",
 )
 
 
-def _find_trace_bench_script():
-    """Locate ``ganyi_bench_k5_gdr_inline.py`` next to this aiter checkout."""
-    here = _os.path.dirname(_os.path.abspath(__file__))
-    workspace = here
-    for _ in range(8):
-        candidate = _os.path.join(
-            workspace, "flydsl_k5_basic_info_0520",
-            "ganyi_bench_k5_gdr_inline.py",
-        )
-        if _os.path.isfile(candidate):
-            return candidate
-        parent = _os.path.dirname(workspace)
-        if parent == workspace:
-            break
-        workspace = parent
-    return None
-
-
-def _parse_trace_shapes(bench_script_path):
-    """Parse the ``_SHAPES_RAW`` literal in the bench script.
-
-    Returns a list of dicts ``{log_count, T, cu, context_lens}`` (one
-    per unique trace shape, sorted by log_count descending -- same
-    order the bench produces).
-    """
-    if not bench_script_path:
-        return []
-    try:
-        with open(bench_script_path) as f:
-            src = f.read()
-    except OSError:
-        return []
-    import re as _re
-    m = _re.search(r'_SHAPES_RAW = """\s*\n(.*?)\n"""', src, _re.DOTALL)
-    if not m:
+def _build_bench407_params():
+    if not _bench407_os.path.isfile(_BENCH407_CSV):
         return []
     out = []
-    for line in m.group(1).strip().splitlines():
-        log_count_s, T_s, cu_s = line.split("|", 2)
-        cu = [int(x) for x in cu_s.split()]
-        T = int(T_s)
-        out.append({
-            "log_count": int(log_count_s),
-            "T": T,
-            "cu": cu,
-            "context_lens": [cu[i + 1] - cu[i] for i in range(len(cu) - 1)],
-        })
+    with open(_BENCH407_CSV) as f:
+        for row in _bench407_csv.DictReader(f):
+            cu = [int(x) for x in row["cu_seqlens_prefill"].split()]
+            context_lens = [cu[i + 1] - cu[i] for i in range(len(cu) - 1)]
+            if not context_lens:
+                continue
+            T = sum(context_lens)
+            log_count = int(row["log_count"])
+            out.append(
+                PrefillArgs(
+                    K=128,
+                    V=128,
+                    Hk=16,
+                    Hv=32,
+                    tp=1,
+                    BT=64,
+                    full_prompt_len=T,
+                    max_num_batched_tokens=T,
+                    model_name="prefill-bench333",
+                    is_varlen=True,
+                    output_final_state=True,
+                    ssm_state_dtype=torch.float32,
+                    context_lens=context_lens,
+                    trace_tag=f"cnt{log_count}",
+                )
+            )
     return out
 
 
-def _trace_shape_to_args(shape, *, model_name="Qwen3Next-trace"):
-    """Wrap one parsed trace shape into a ``PrefillArgs``."""
-    # cu_seqlens can be 64 entries long, so hash it for a short tag
-    # that's still unique across shapes that share (T, num_seqs).
-    cu_digest = _hashlib.md5(
-        " ".join(map(str, shape["cu"])).encode()
-    ).hexdigest()[:6]
-    return PrefillArgs(
-        full_prompt_len=shape["T"],
-        max_num_batched_tokens=shape["T"],
-        model_name=model_name,
-        context_lens=shape["context_lens"],
-        trace_tag=f"cnt{shape['log_count']}_{cu_digest}",
-        **_TRACE_HEAD_DIMS,
-    )
+BENCH407_PARAMS = _build_bench407_params()
+PREFILL_PARAMS.extend(BENCH407_PARAMS)
 
-
-_TRACE_BENCH_SCRIPT = _find_trace_bench_script()
-_TRACE_SHAPES = _parse_trace_shapes(_TRACE_BENCH_SCRIPT)
-
-# Selected ~10 representative shapes spanning the trace's main regimes.
-# Selection criteria (keep in sync with the docstring above):
-#
-#   1) Top-3 highest log_count single-segment cases (true single-seq
-#      prefill; tests the no-batch K5 path).
-#   2) Top-3 highest log_count "1-token prefixes + long tail" cases
-#      (the most frequent ragged pattern in the trace).
-#   3) Three T=32768 mainstream-batch cases (T=32768 == 44.2% of all
-#      log calls).
-#   4) Two FlyDSL-K5 weak-spot sentinels: small T + large num_seqs,
-#      where rule-based BV=64 is a poor fit (regression guard).
-#
-# Trace shapes are matched by ``(T, num_seqs, cu[1:5])`` -- a tuple
-# we store inline so the selection survives shape-list reordering.
-_REP_SELECTORS = [
-    # 1) Single-segment cases (n_seqs == 1):
-    (1000,    1, (1000,)),
-    (5000,    1, (5000,)),
-    (10000,   1, (10000,)),
-    # 2) 1-token-prefix + long tail (most frequent ragged pattern):
-    (5063,   64, (1, 2, 3, 4)),    # cnt=756, the trace-frequency #1 shape
-    (1063,   64, (1, 2, 3, 4)),    # cnt=648
-    (5031,   32, (1, 2, 3, 4)),    # cnt=612
-    # 3) T=32768 mainstream-batch cases:
-    (32768,   5, (1, 10001, 20001, 30001, 32768)),  # cnt=252
-    (32768,   8, (1, 2, 3, 4, 7237)),                # cnt=252
-    (32768,  11, (1, 2, 3, 4, 5004)),                # cnt=216
-    # 4) FlyDSL-K5 weak-spot sentinels (smallest tri/fly ratios in
-    #    the 407-shape bench: 0.25x and 0.40x respectively):
-    (1051,   52, (1, 2, 3, 4)),
-    (32768,  62, (1, 2, 3, 4, 5)),
-]
-
-
-def _build_representative_trace_params():
-    """Filter ``_TRACE_SHAPES`` down to the 10-or-so selectors above.
-
-    Match on ``(T, num_seqs, tuple(cu[1:1+k]))`` where ``k`` is the
-    selector's prefix length, so we don't have to encode the entire
-    cu_seqlens and the matching is robust to logically-equivalent
-    layouts (none currently exist in the trace, but it's cheap).
-    """
-    out = []
-    by_key = {}
-    for s in _TRACE_SHAPES:
-        n = len(s["cu"]) - 1
-        key = (s["T"], n)
-        by_key.setdefault(key, []).append(s)
-    for T, n, cu_prefix in _REP_SELECTORS:
-        candidates = by_key.get((T, n), [])
-        match = None
-        for s in candidates:
-            if tuple(s["cu"][1:1 + len(cu_prefix)]) == cu_prefix:
-                match = s
-                break
-        if match is None and candidates:
-            # If the cu prefix doesn't match exactly, fall back to the
-            # highest-frequency shape sharing (T, n_seqs). Helps the
-            # selectors stay stable if the bench script's exact cu
-            # layout for a (T, n) pair changes slightly.
-            match = max(candidates, key=lambda s: s["log_count"])
-        if match is not None:
-            out.append(_trace_shape_to_args(match,
-                                             model_name="Qwen3Next-rep"))
-    return out
-
-
-def _build_full_trace_params():
-    """All 407 trace shapes, sorted by log_count descending."""
-    return [_trace_shape_to_args(s) for s in _TRACE_SHAPES]
-
-
-TRACE_REPRESENTATIVE_PARAMS = _build_representative_trace_params()
-TRACE_FULL_PARAMS = _build_full_trace_params()
-
-# Always include the ~10 representative trace shapes in the standard
-# parametrization -- they're small, deterministic, and serve as
-# regression sentinels for FlyDSL-K5's known weak points.
-PREFILL_PARAMS.extend(TRACE_REPRESENTATIVE_PARAMS)
-
-# A perf-only parametrization that *also* includes every remaining
-# trace shape (~395), each tagged with ``pytest.mark.slow`` so it is
-# skipped by default. The ``slow`` marker is honored by this directory's
-# ``conftest.py`` (which adds the ``--run-slow`` CLI flag); slow tests
-# are skipped unless ``--run-slow`` is passed. Only
-# ``TestPerformance.test_perf_comparison`` parametrizes over this
-# expanded list -- correctness tests stick with the standard
-# ``PREFILL_PARAMS`` to keep their wall time bounded.
-#
-# To run default + every slow trace shape together:
-#
-#   pytest -sv --run-slow \
-#     aiter/ops/flydsl/test_flydsl_linear_attention_prefill.py::TestPerformance
-#
-# To run only the slow trace shapes:
-#
-#   pytest -sv --run-slow -k Qwen3Next-trace \
-#     aiter/ops/flydsl/test_flydsl_linear_attention_prefill.py::TestPerformance
-_REP_TAGS = {a.trace_tag for a in TRACE_REPRESENTATIVE_PARAMS}
-_TRACE_SLOW_ONLY_PARAMS = [
-    pytest.param(a, id=repr(a), marks=pytest.mark.slow)
-    for a in TRACE_FULL_PARAMS
-    if a.trace_tag not in _REP_TAGS
-]
-PERF_PARAMS = list(PREFILL_PARAMS) + _TRACE_SLOW_ONLY_PARAMS
-
-# pytest IDs for ``PERF_PARAMS``. ``pytest.param`` entries already have
-# their own ``id=`` assigned (we set ``id=repr(a)`` above); only the
-# bare ``PrefillArgs`` rows from ``PREFILL_PARAMS`` need a manual
-# ``repr()`` since ``pytest.parametrize`` defaults to ``args0``,
-# ``args1``, ... when ``ids=`` is omitted, which buries the shape info
-# and breaks ``-k`` substring filtering. We pass ``None`` for the
-# pre-tagged entries so pytest uses the embedded id.
-PERF_TEST_IDS = [
-    repr(p) if isinstance(p, PrefillArgs) else None
-    for p in PERF_PARAMS
-]
+# Perf-test parametrization is identical to the correctness one; trace-
+# derived shapes have been removed from this file.
+PERF_PARAMS = list(PREFILL_PARAMS)
+PERF_TEST_IDS = [repr(p) for p in PERF_PARAMS]
 
 
 # Mirror every base shape with a bf16-SSM-state variant. The bf16 vs f32
@@ -848,6 +337,105 @@ PERF_TEST_IDS = [
 #         for _base in list(PREFILL_PARAMS)
 #     ]
 # )
+
+
+# -- bf16 SSM-state params (paired with TestStateDtypeBF16 below) ------
+
+# A small, fast subset of shapes used to validate the bf16-state code path
+# (h0 / final_state in bf16). Picked to cover both the non-varlen and varlen
+# launch routes while keeping kernel JIT compile time low.
+STATE_BF16_PARAMS = [
+    PrefillArgs(
+        K=128,
+        V=128,
+        Hk=16,
+        Hv=32,
+        tp=2,
+        full_prompt_len=2500,
+        model_name="Qwen3.5-35B-bf16state",
+        is_varlen=False,
+        output_final_state=True,
+        max_num_batched_tokens=2500,
+    ),
+    PrefillArgs(
+        K=128,
+        V=128,
+        Hk=16,
+        Hv=64,
+        tp=4,
+        full_prompt_len=1024,
+        model_name="Qwen3.5-tp4-1k-bf16state",
+        is_varlen=True,
+        output_final_state=True,
+        max_num_batched_tokens=8192,
+    ),
+]
+STATE_BF16_TEST_IDS = [repr(p) for p in STATE_BF16_PARAMS]
+
+
+# -- bench333 CI regression subset (paired with TestPerformanceCI) ------
+
+# 28 representative cases covering all distinct (T_bucket, N_bucket,
+# mid_bucket, BV) signatures of the 333-shape bench333 trace, one
+# highest-log_count case per signature. Covers 13,896 / 28,152 =
+# 49.4% of the trace's total log_count weight.
+#
+# Derived offline from ``bench_407_prefill_only.csv`` +
+# ``chunk_gdn_h_bench407_tuned.csv``; encoded here as a frozenset of
+# pytest ids (= ``repr(args)`` for each case) so we don't recompute
+# the signature classification at import time.
+#
+# Ordering convention: cases where FlyDSL beats vLLM (fly/vllm > 1.10x)
+# appear FIRST (sorted by ratio desc), then near-parity cases that are
+# slightly above 1.0x, then the cases where FlyDSL is at or below
+# vLLM. This makes regressions visible early in the per-row summary
+# table -- the bottom rows are the ones to watch when a kernel change
+# might trade short-T wins for long-T losses.
+#
+# Ratios reflect a single bench run on MI355X gfx950 (see commit log)
+# and have some variance across runs (~0.05x on long-T single-seg
+# cases); rerank if the population shifts > 0.20x.
+REP_BENCH333_IDS = [
+    # --- FlyDSL clearly beats vLLM (fly/vllm > 1.10x, 9 cases) ---
+    "prefill-bench333_T5000_n1_cnt2844",    # rvllm=1.55x
+    "prefill-bench333_T4469_n1_cnt180",     # rvllm=1.54x
+    "prefill-bench333_T5356_n2_cnt36",      # rvllm=1.49x
+    "prefill-bench333_T1000_n1_cnt3096",    # rvllm=1.48x
+    "prefill-bench333_T10000_n1_cnt1764",   # rvllm=1.34x
+    "prefill-bench333_T11720_n2_cnt144",    # rvllm=1.27x
+    "prefill-bench333_T2000_n2_cnt36",      # rvllm=1.18x
+    "prefill-bench333_T9472_n2_cnt36",      # rvllm=1.11x
+    "prefill-bench333_T20000_n2_cnt576",    # rvllm=1.10x
+    # --- Near-parity with vLLM (0.95-1.10x, 15 cases) ---
+    "prefill-bench333_T10000_n2_cnt576",    # rvllm=1.08x
+    "prefill-bench333_T7000_n7_cnt288",     # rvllm=1.02x
+    "prefill-bench333_T11745_n3_cnt36",     # rvllm=1.01x
+    "prefill-bench333_T32000_n32_cnt180",   # rvllm=0.99x
+    "prefill-bench333_T23499_n3_cnt108",    # rvllm=0.98x
+    "prefill-bench333_T15864_n4_cnt36",     # rvllm=0.98x
+    "prefill-bench333_T15000_n3_cnt828",    # rvllm=0.97x
+    "prefill-bench333_T30000_n3_cnt1080",   # rvllm=0.96x
+    "prefill-bench333_T30000_n6_cnt360",    # rvllm=0.96x
+    "prefill-bench333_T32767_n4_cnt252",    # rvllm=0.96x
+    "prefill-bench333_T32755_n33_cnt72",    # rvllm=0.96x
+    "prefill-bench333_T20000_n20_cnt288",   # rvllm=0.95x
+    "prefill-bench333_T27236_n6_cnt144",    # rvllm=0.95x
+    "prefill-bench333_T18245_n19_cnt72",    # rvllm=0.95x
+    "prefill-bench333_T27264_n3_cnt36",     # rvllm=0.95x
+    # --- FlyDSL loses to vLLM (fly/vllm < 0.95x, 4 cases) ---
+    "prefill-bench333_T9000_n9_cnt108",     # rvllm=0.94x
+    "prefill-bench333_T4000_n4_cnt36",      # rvllm=0.94x
+    "prefill-bench333_T3000_n3_cnt432",     # rvllm=0.91x
+    "prefill-bench333_T10000_n10_cnt252",   # rvllm=0.87x
+]
+
+# Build PARAMS in ``REP_BENCH333_IDS`` order (not BENCH407_PARAMS order)
+# so pytest collection -- and the per-row summary table that follows
+# ``_perf_results`` insertion order -- emits the cases in the same order
+# they are listed above.
+_bench407_by_id = {repr(p): p for p in BENCH407_PARAMS}
+REP_BENCH333_PARAMS = [_bench407_by_id[i] for i in REP_BENCH333_IDS if i in _bench407_by_id]
+REP_BENCH333_TEST_IDS = [repr(p) for p in REP_BENCH333_PARAMS]
 
 
 # -- Helper functions ---------------------------------------------------
@@ -1212,128 +800,6 @@ class TestCorrectness:
             label="triton_vk",
         )
 
-    @pytest.mark.parametrize("args", PREFILL_PARAMS, ids=PREFILL_TEST_IDS)
-    def test_correctness_triton_kv(self, args: PrefillArgs):
-        """Triton KV K5 (h: [K, V]) -- h0/h/final_state are transposed.
-
-        We feed the wrapper a KV-layout ``initial_state`` (transposed from the
-        VK-layout ``h0`` produced by ``_make_inputs``), and transpose the
-        returned ``h`` / ``final_state`` back to VK so they compare to the
-        common FP32 reference.
-        """
-        if args.ssm_state_dtype != torch.float32:
-            pytest.skip("Triton KV reference only supports f32 SSM state.")
-        context_lens = args.resolve_context_lens()
-        k, w_orig, u_orig, w_c, u_c, g, h0, cu, _ = _make_inputs(
-            context_lens, args=args
-        )
-
-        h0_kv = h0.transpose(-2, -1).contiguous() if h0 is not None else None
-
-        h_kv, vn_kv, fs_kv = chunk_gated_delta_rule_fwd_h_opt(
-            k,
-            w_c,
-            u_c,
-            g=g,
-            initial_state=h0_kv,
-            output_final_state=args.output_final_state,
-            cu_seqlens=cu,
-        )
-        h_ref, vn_ref, fs_ref = ref_chunk_gated_delta_rule_fwd_h(
-            k,
-            w_orig,
-            u_orig,
-            g=g,
-            initial_state=h0,
-            output_final_state=args.output_final_state,
-            cu_seqlens=cu,
-        )
-
-        # KV-layout outputs need to be transposed back to VK for comparison.
-        h_kv_vk = h_kv.transpose(-2, -1).contiguous()
-        fs_kv_vk = fs_kv.transpose(-2, -1).contiguous() if fs_kv is not None else None
-
-        _assert_k5_outputs_match_ref(
-            h_kv_vk,
-            vn_kv,
-            fs_kv_vk,
-            h_ref,
-            vn_ref,
-            fs_ref,
-            output_final_state=args.output_final_state,
-            label="triton_kv",
-        )
-
-    @pytest.mark.parametrize("args", PREFILL_PARAMS, ids=PREFILL_TEST_IDS)
-    def test_correctness_triton_origin(self, args: PrefillArgs):
-        """Triton origin K5 (h: [K, V]) -- unoptimized baseline kernel.
-
-        The origin kernel does not support GQA (it expects k shape [B, T, H, K]
-        where H is the value-head count). We expand k from [B, T, Hg, K] to
-        [B, T, H, K] via repeat_interleave when Hg != H.
-        """
-        if args.ssm_state_dtype != torch.float32:
-            pytest.skip("Triton origin reference only supports f32 SSM state.")
-        context_lens = args.resolve_context_lens()
-        k, w_orig, u_orig, w_c, u_c, g, h0, cu, _ = _make_inputs(
-            context_lens, args=args
-        )
-
-        H = args.Hv // args.tp
-        Hg = args.Hk // args.tp
-        gqa_ratio = H // Hg
-        k_origin = k.repeat_interleave(gqa_ratio, dim=2) if gqa_ratio > 1 else k
-
-        h0_kv = h0.transpose(-2, -1).contiguous() if h0 is not None else None
-
-        h_origin, vn_origin, fs_origin = chunk_gated_delta_rule_fwd_h(
-            k_origin,
-            w_orig,
-            u_orig,
-            g=g,
-            initial_state=h0_kv,
-            output_final_state=args.output_final_state,
-            cu_seqlens=cu,
-        )
-        h_ref, vn_ref, fs_ref = ref_chunk_gated_delta_rule_fwd_h(
-            k,
-            w_orig,
-            u_orig,
-            g=g,
-            initial_state=h0,
-            output_final_state=args.output_final_state,
-            cu_seqlens=cu,
-        )
-
-        h_origin_vk = h_origin.transpose(-2, -1).contiguous()
-        fs_origin_vk = (
-            fs_origin.transpose(-2, -1).contiguous() if fs_origin is not None else None
-        )
-
-        atol, rtol = 5e-2, 5e-2
-        torch.testing.assert_close(
-            h_origin_vk.float(),
-            h_ref.float(),
-            atol=atol,
-            rtol=rtol,
-            msg="triton_origin: h mismatch",
-        )
-        torch.testing.assert_close(
-            vn_origin.float(),
-            vn_ref.float(),
-            atol=atol,
-            rtol=rtol,
-            msg="triton_origin: v_new mismatch",
-        )
-        if args.output_final_state:
-            torch.testing.assert_close(
-                fs_origin_vk.float(),
-                fs_ref.float(),
-                atol=atol,
-                rtol=rtol,
-                msg="triton_origin: final_state mismatch",
-            )
-
     @pytest.mark.skipif(
         not _HAS_VLLM_K5,
         reason="vllm.model_executor.layers.fla.ops.chunk_delta_h not importable",
@@ -1490,40 +956,376 @@ class TestCorrectness:
             )
 
 
-# -- bf16 SSM-state correctness ------------------------------------------
+_perf_results: list[dict] = []
 
 
-# A small, fast subset of shapes used to validate the bf16-state code path
-# (h0 / final_state in bf16). Picked to cover both the non-varlen and varlen
-# launch routes while keeping kernel JIT compile time low.
-STATE_BF16_PARAMS = [
-    PrefillArgs(
-        K=128,
-        V=128,
-        Hk=16,
-        Hv=32,
-        tp=2,
-        full_prompt_len=2500,
-        model_name="Qwen3.5-35B-bf16state",
-        is_varlen=False,
-        output_final_state=True,
-        max_num_batched_tokens=2500,
-    ),
-    PrefillArgs(
-        K=128,
-        V=128,
-        Hk=16,
-        Hv=64,
-        tp=4,
-        full_prompt_len=1024,
-        model_name="Qwen3.5-tp4-1k-bf16state",
-        is_varlen=True,
-        output_final_state=True,
-        max_num_batched_tokens=8192,
-    ),
-]
-STATE_BF16_TEST_IDS = [repr(p) for p in STATE_BF16_PARAMS]
+def _run_perf_comparison(args: PrefillArgs):
+    """Per-shape K5 perf body shared by ``TestPerformance`` and ``TestPerformanceCI``.
 
+    Bench 4 backends (FlyDSL, Triton opt_vk, Triton origin_opt, vLLM)
+    under identical inputs and append a row to ``_perf_results``. The
+    summary table is printed once at session teardown by
+    ``_print_summary_table``.
+    """
+    context_lens = args.resolve_context_lens()
+    k, w_orig, u_orig, w_c, u_c, g, h0, cu, _ = _make_inputs(
+        context_lens, args=args
+    )
+    total_tokens = sum(context_lens)
+
+    # Triton K5 host wrappers only accept f32 ``initial_state`` and always
+    # produce an f32 ``final_state``. When FlyDSL is benched with a bf16
+    # SSM state, we still want a Triton baseline for comparison, so we
+    # promote h0 to f32 once (outside the timed window) and feed it to
+    # the Triton closures. The resulting "Triton(f32) vs FlyDSL(bf16)"
+    # row answers the practical question "how much does enabling
+    # bf16-state win against the existing Triton baseline?".
+    h0_triton_vk = (
+        h0.float() if (h0 is not None and h0.dtype != torch.float32) else h0
+    )
+
+    # triton_origin_opt uses a [K, V] hidden-state layout, so its h0
+    # is the VK reference h0 transposed on the last two dims.
+    h0_origin_kv = (
+        h0_triton_vk.transpose(-2, -1).contiguous()
+        if h0_triton_vk is not None
+        else None
+    )
+
+    # K5 launch closures: each invokes the K5 host wrapper of its backend.
+    def flydsl_launch():
+        chunk_gated_delta_rule_fwd_h_flydsl(
+            k=k,
+            w=w_c,
+            u=u_c,
+            g=g,
+            initial_state=h0,
+            output_final_state=args.output_final_state,
+            cu_seqlens=cu,
+        )
+
+    def triton_vk_launch():
+        chunk_gated_delta_rule_fwd_h_opt_vk(
+            k=k,
+            w=w_c,
+            u=u_c,
+            g=g,
+            initial_state=h0_triton_vk,
+            output_final_state=args.output_final_state,
+            cu_seqlens=cu,
+        )
+
+    # vLLM upstream K5 (chunk_delta_h.chunk_gated_delta_rule_fwd_h). Uses
+    # the same vk hidden-state layout and same final_state dtype as the
+    # aiter ``opt_vk`` wrapper, but unlike ``opt_vk`` its host wrapper
+    # infers ``H = u.shape[-2]`` (T-major), so it requires the un-permuted
+    # ``w_orig`` / ``u_orig`` -- feeding the H-major ``w_c`` / ``u_c``
+    # would make vLLM compute ``H = T`` and try to allocate a
+    # terabyte-sized ``h``. vLLM supports GQA natively, so ``k`` is also
+    # passed un-expanded. We still feed the same h0_triton_vk (fp32) as
+    # ``triton_vk_launch`` because vk hidden-state layout is identical.
+    def vllm_launch():
+        chunk_gated_delta_rule_fwd_h_vllm(
+            k=k,
+            w=w_orig,
+            u=u_orig,
+            g=g,
+            initial_state=h0_triton_vk,
+            output_final_state=args.output_final_state,
+            cu_seqlens=cu,
+        )
+
+    def triton_origin_opt_launch():
+        # GQA-aware (uses unexpanded k) BV=16 + exp2 variant of fwd_h
+        # from the standalone bench's new pipeline. Hidden state in
+        # [K,V] layout, so it needs h0_origin_kv (h0 transposed from
+        # the VK reference layout).
+        chunk_gated_delta_rule_fwd_h_origin_opt(
+            k=k,
+            w=w_orig,
+            u=u_orig,
+            g=g,
+            initial_state=h0_origin_kv,
+            output_final_state=args.output_final_state,
+            cu_seqlens=cu,
+        )
+
+    # Warmup FlyDSL once so its internal BV-autotune sweep does not
+    # leak into the timed window. Triton's own ``triton.autotune`` is
+    # already absorbed by ``_bench_fn``'s NUM_WARMUP=5 prelude, except
+    # for vLLM upstream's K5 -- its first call also runs a BV/warps/
+    # stages sweep and the 5-iter prelude is not always enough to
+    # converge the autotuner on long-T shapes. Pre-warm it once here
+    # for parity with FlyDSL so that ``us_vllm`` reflects steady-state
+    # kernel time, not the autotune sweep.
+    flydsl_launch()
+    if _HAS_VLLM_K5:
+        vllm_launch()
+    torch.cuda.synchronize()
+
+    us_fly = _bench_fn(flydsl_launch)
+    us_triton_vk = _bench_fn(triton_vk_launch)
+    us_triton_origin_opt = _bench_fn(triton_origin_opt_launch)
+    us_vllm = _bench_fn(vllm_launch) if _HAS_VLLM_K5 else float("nan")
+
+    fly_vs_vk = us_triton_vk / us_fly if us_fly > 0 else float("inf")
+    fly_vs_origin_opt = (
+        us_triton_origin_opt / us_fly if us_fly > 0 else float("inf")
+    )
+    fly_vs_vllm = (
+        us_vllm / us_fly if (us_fly > 0 and us_vllm == us_vllm) else float("nan")
+    )
+
+    # bench333 cases carry trace-derived structural features (head/mid/
+    # tail seqlen, log_count); compute these once so the summary table
+    # can display them in a bench333-specific sub-table. Non-bench333
+    # rows leave these fields at their defaults (None / 0).
+    head_seqlen = mid_seqlen = tail_seqlen = 0
+    log_count = 0
+    if args.context_lens is not None and args.model_name == "prefill-bench333":
+        lens = list(args.context_lens)
+        if len(lens) == 1:
+            head_seqlen, tail_seqlen = int(lens[0]), 0
+        elif len(lens) == 2:
+            head_seqlen, tail_seqlen = int(lens[0]), int(lens[1])
+        elif len(lens) >= 3:
+            mids = lens[1:-1]
+            head_seqlen = int(lens[0])
+            tail_seqlen = int(lens[-1])
+            mid_seqlen = int(mids[0]) if all(m == mids[0] for m in mids) else 0
+        # trace_tag is set to "cnt{log_count}" by _build_bench407_params.
+        if args.trace_tag.startswith("cnt"):
+            try:
+                log_count = int(args.trace_tag[3:])
+            except ValueError:
+                log_count = 0
+
+    # For bench333 trace shapes the model name is the same string for
+    # all 333 rows ("prefill-bench333") which is useless in the per-row
+    # summary table. Use the trailing "T{T}_n{N}_cnt{log_count}" suffix
+    # of the pytest id instead, so each row's Model cell uniquely
+    # identifies the case.
+    if args.model_name == "prefill-bench333" and args.context_lens is not None:
+        n_seqs = len(args.context_lens)
+        T_total = sum(args.context_lens)
+        model_label = f"T{T_total}_n{n_seqs}_{args.trace_tag}"
+    else:
+        model_label = args.model_name or "-"
+
+    _perf_results.append(
+        {
+            "Model": model_label,
+            "TP": args.tp,
+            "K": args.K,
+            "V": args.V,
+            "Hg": args.Hg,
+            "H": args.H,
+            "SeqLen": args.full_prompt_len,
+            "T": total_tokens,
+            "varlen": args.is_varlen,
+            "final_st": args.output_final_state,
+            "state": "bf16" if args.ssm_state_dtype == torch.bfloat16 else "fp32",
+            # bench333-only fields (0 for main-table rows)
+            "T_prefill": total_tokens if args.model_name == "prefill-bench333" else 0,
+            "num_seqs_prefill": (
+                len(args.context_lens)
+                if args.context_lens is not None
+                and args.model_name == "prefill-bench333"
+                else 0
+            ),
+            "head_seqlen": head_seqlen,
+            "mid_seqlen": mid_seqlen,
+            "tail_seqlen": tail_seqlen,
+            "log_count": log_count,
+            # Perf columns (same for all rows)
+            "FlyDSL_vk(us)": us_fly,
+            "Triton_vk(us)": us_triton_vk,
+            "Triton_origin_opt(us)": us_triton_origin_opt,
+            "vLLM_vk(us)": us_vllm,
+            "flydsl_vs_vk": fly_vs_vk,
+            "flydsl_vs_origin_opt": fly_vs_origin_opt,
+            "flydsl_vs_vllm": fly_vs_vllm,
+        }
+    )
+
+
+class TestPerformance:
+    """Kernel-only performance comparison: FlyDSL vs Triton opt_vk vs Triton opt3_kv.
+
+    Parametrizes over the full ``PERF_PARAMS`` (= main-table + bench333
+    + STATE_BF16 in some configurations). For CI regression on the
+    bench333 subset, use ``TestPerformanceCI`` instead -- it covers
+    the same set of distinct (T_bucket, N_bucket, mid_bucket, BV)
+    families with ~28 representative cases (~50% workload-weighted
+    coverage) in under 10 seconds.
+    """
+
+    @pytest.mark.parametrize("args", PERF_PARAMS, ids=PERF_TEST_IDS)
+    def test_perf_comparison(self, args: PrefillArgs):
+        _run_perf_comparison(args)
+
+
+class TestPerformanceCI:
+    """Regression-gating subset of bench333: 28 cases covering all
+    distinct (T_bucket, N_bucket, mid_bucket, BV) signatures.
+
+    Selection:
+      - T_bucket: <2k, 2k-5k, 5k-10k, 10k-20k, 20k-30k, >=30k
+      - N_bucket: 1, 2, 3, 4-8, 9-16, 17-32, >32
+      - mid_bucket: 0 (none) / 1k / 5k / 10k / other
+      - BV: 16 / 32 / 64 (from offline sweep)
+
+    Within each signature the case with the highest ``log_count`` is
+    chosen. The 28-case set covers 13,896 / 28,152 = 49.4% of the
+    bench333 trace's total log_count weight.
+
+    Runs in ~8 seconds on MI355X (28 cases × ~0.3s each).
+    """
+
+    @pytest.mark.parametrize(
+        "args", REP_BENCH333_PARAMS, ids=REP_BENCH333_TEST_IDS
+    )
+    def test_perf_comparison_ci(self, args: PrefillArgs):
+        _run_perf_comparison(args)
+
+
+def _print_perf_table():
+    if not _perf_results:
+        return
+
+    # Two column layouts:
+    #   - main_cols  : for hand-written PrefillGroup shapes (Qwen3.5-35B
+    #                  / 397B / varlen-fs / bench333-varlen) showing
+    #                  SeqLen + T + varlen + final_st.
+    #   - bench_cols : for bench333 trace-derived shapes showing
+    #                  T_prefill + num_seqs_prefill + head/mid/tail
+    #                  + log_count instead. SeqLen / T are redundant
+    #                  here because T_prefill carries the same info.
+    perf_tail_cols = [
+        ("FlyDSL", "FlyDSL_vk(us)", 8),
+        ("Tri_vk", "Triton_vk(us)", 8),
+        ("Tri_orig_opt", "Triton_origin_opt(us)", 12),
+        ("vLLM", "vLLM_vk(us)", 8),
+        ("fly/vk", "flydsl_vs_vk", 7),
+        ("fly/o_opt", "flydsl_vs_origin_opt", 9),
+        ("fly/vllm", "flydsl_vs_vllm", 8),
+    ]
+    main_cols = [
+        ("Model", "Model", 16),
+        ("TP", "TP", 3),
+        ("Hg", "Hg", 3),
+        ("H", "H", 3),
+        ("SeqLen", "SeqLen", 7),
+        ("T", "T", 7),
+        ("var", "varlen", 3),
+        ("fs", "final_st", 3),
+    ] + perf_tail_cols
+    bench_cols = [
+        ("Model", "Model", 22),
+        ("TP", "TP", 3),
+        ("Hg", "Hg", 3),
+        ("H", "H", 3),
+        ("T_prefill", "T_prefill", 9),
+        ("n_pref", "num_seqs_prefill", 6),
+        ("head", "head_seqlen", 6),
+        ("mid", "mid_seqlen", 6),
+        ("tail", "tail_seqlen", 6),
+        ("log_cnt", "log_count", 7),
+    ] + perf_tail_cols
+
+    def _build_header_sep(cols):
+        header = " | ".join(display.rjust(width) for display, _, width in cols)
+        sep = "-+-".join("-" * width for _, _, width in cols)
+        return header, sep
+
+    def _fmt_row(row, cols):
+        cells = []
+        for display, key, width in cols:
+            val = row[key]
+            if isinstance(val, bool):
+                cells.append(("Y" if val else "N").rjust(width))
+            elif isinstance(val, float):
+                if val != val:  # NaN (e.g. vLLM column when vllm not installed)
+                    cells.append("-".rjust(width))
+                elif "_vs_" in key:
+                    cells.append(f"{val:.2f}x".rjust(width))
+                else:
+                    cells.append(f"{val:.1f}".rjust(width))
+            else:
+                cells.append(str(val).rjust(width))
+        return " | ".join(cells)
+
+    main_header, main_sep = _build_header_sep(main_cols)
+    bench_header, bench_sep = _build_header_sep(bench_cols)
+    border = "=" * max(len(main_header), len(bench_header))
+
+    # Bucket rows by SSM-state dtype and by main-vs-bench333. Keep each
+    # bucket's order consistent with ``_perf_results`` insertion so rows
+    # line up with the parametrize id order. bench333 trace rows are
+    # tagged by ``log_count > 0`` (main groups all leave log_count at 0).
+    def _split(rows):
+        main = [r for r in rows if r.get("log_count", 0) == 0]
+        bench = [r for r in rows if r.get("log_count", 0) > 0]
+        return main, bench
+
+    rows_fp32_main, rows_fp32_bench = _split(
+        [r for r in _perf_results if r["state"] == "fp32"]
+    )
+    rows_bf16_main, rows_bf16_bench = _split(
+        [r for r in _perf_results if r["state"] == "bf16"]
+    )
+
+    lines = ["", border]
+    lines.append(
+        "K5 Prefill Performance Summary "
+        "(K5 device kernel time only, via torch.profiler)"
+    )
+    lines.append(
+        "  Triton K5 references always use fp32 SSM state; only FlyDSL's "
+        "SSM-state dtype changes between the sub-tables below."
+    )
+    lines.append(border)
+
+    def _emit_subtable(title, rows, cols, header, sep):
+        if not rows:
+            return
+        lines.append("")
+        lines.append(title)
+        lines.append(sep)
+        lines.append(header)
+        lines.append(sep)
+        for row in rows:
+            lines.append(_fmt_row(row, cols))
+        lines.append(sep)
+
+    _emit_subtable(
+        "[FlyDSL SSM state = fp32] -- main groups",
+        rows_fp32_main, main_cols, main_header, main_sep,
+    )
+    _emit_subtable(
+        "[FlyDSL SSM state = fp32] -- bench333 trace shapes",
+        rows_fp32_bench, bench_cols, bench_header, bench_sep,
+    )
+    _emit_subtable(
+        "[FlyDSL SSM state = bf16] -- main groups",
+        rows_bf16_main, main_cols, main_header, main_sep,
+    )
+    _emit_subtable(
+        "[FlyDSL SSM state = bf16] -- bench333 trace shapes",
+        rows_bf16_bench, bench_cols, bench_header, bench_sep,
+    )
+    lines.append("")
+    print("\n".join(lines))
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _print_summary_table(request):
+    """Print the summary performance table after all tests finish."""
+    yield
+    _print_perf_table()
+
+
+# -- bf16 SSM-state correctness ----------------------------------------
 
 class TestStateDtypeBF16:
     """Validate that ``state_dtype=bfloat16`` matches the ``float32`` path.
@@ -1678,236 +1480,348 @@ class TestStateDtypeBF16:
             )
 
 
-_perf_results: list[dict] = []
+# -- triton_origin_opt: BV=16 + exp2 variant of fwd_h --------------------
+#
+# Inlined from the (now-deleted) standalone benchmark script
+# ``0423_gdr_prefill_bench_standalone.py``. Launches the same recurrence
+# kernel as the existing ``chunk_gated_delta_rule_fwd_h`` (``triton_origin``
+# in this file), but with two changes that the standalone bench's new
+# pipeline applies on top of the original RTP config:
+#
+#   - BV = 16 (was 32): smaller V-tile -> more (V/BV) blocks per (B*H)
+#     program-id pair -> better occupancy on MI355X.
+#   - USE_EXP2 = True (was False): emits a single ``v_exp_f32`` per
+#     gate evaluation instead of the ``v_log + v_mul + v_exp`` chain that
+#     ``tl.exp`` lowers to.
+#
+# Because USE_EXP2 expects gates pre-scaled by ``1/ln(2)``, the wrapper
+# multiplies the supplied ``g`` (already a per-chunk cumsum, as produced
+# by ``_make_inputs``) by RCP_LN2 before launching. That scale step is
+# excluded from the K5 kernel time -- we time only the kernel itself, in
+# line with how the other K5 wrappers in this file are benchmarked.
+#
+# The kernel itself is wrapped in a ``triton.autotune`` sweep over
+# (BV, num_warps, num_stages); the standalone version pinned BV=16
+# only, but exposing the sweep here matches what aiter's own
+# ``chunk_gated_delta_rule_fwd_kernel_h_blockdim64`` does internally
+# and lets each shape pick its own best config on first run.
+
+_RCP_LN2 = 1.0 / 0.6931471805599453
+
+_exp = tl.exp
+_exp2 = tl.math.exp2
 
 
-class TestPerformance:
-    """Kernel-only performance comparison: FlyDSL vs Triton opt_vk vs Triton opt3_kv.
+# Decorator stack mirrors FLA's K5 kernels (Heuristics outer, Autotune
+# inner) so that Triton 3.x writes the sweep result to its persistent
+# autotune cache (`~/.triton/autotune`) via ``cache_results=True``. After
+# the first run each (H, K, V, BT, IS_VARLEN) key is served from disk and
+# subsequent runs no longer launch the full BV/warps/stages sweep -- the
+# rocprof kernel-stats CSV then reports the same ~56 calls as the other
+# K5 kernels, instead of the 9000+ that an un-cached sweep produces.
+#
+# ``Hg`` is intentionally excluded from ``key``: it only affects host-side
+# address arithmetic (``H // Hg`` divisor for the K block-ptr), not the
+# compiled binary or tile shape, so adding it would just multiply the
+# number of unique keys and force redundant sweeps.
+@triton.heuristics(
+    {
+        "USE_G": lambda args: args["g"] is not None,
+        "USE_GK": lambda args: args["gk"] is not None,
+        "USE_INITIAL_STATE": lambda args: args["h0"] is not None,
+        "STORE_FINAL_STATE": lambda args: args["ht"] is not None,
+        "SAVE_NEW_VALUE": lambda args: args["v_new"] is not None,
+        "IS_VARLEN": lambda args: args["cu_seqlens"] is not None,
+    }
+)
+@triton.autotune(
+    configs=[
+        triton.Config({"BV": BV}, num_warps=num_warps, num_stages=num_stages)
+        for BV in (16, 32, 64)
+        for num_warps in (2, 4)
+        for num_stages in (2, 3)
+    ],
+    key=["H", "K", "V", "BT", "IS_VARLEN"],
+    cache_results=True,
+)
+@triton.jit(do_not_specialize=["T"])
+def chunk_gated_delta_rule_fwd_kernel_h_origin_opt(
+    k,
+    v,
+    w,
+    v_new,
+    g,
+    gk,
+    h,
+    h0,
+    ht,
+    cu_seqlens,
+    chunk_offsets,
+    T,
+    H: tl.constexpr,
+    Hg: tl.constexpr,
+    K: tl.constexpr,
+    V: tl.constexpr,
+    BT: tl.constexpr,
+    BV: tl.constexpr,
+    USE_G: tl.constexpr,
+    USE_GK: tl.constexpr,
+    USE_INITIAL_STATE: tl.constexpr,
+    STORE_FINAL_STATE: tl.constexpr,
+    SAVE_NEW_VALUE: tl.constexpr,
+    USE_EXP2: tl.constexpr,
+    IS_VARLEN: tl.constexpr,
+):
+    i_v, i_nh = tl.program_id(0), tl.program_id(1)
+    i_n, i_h = i_nh // H, i_nh % H
+    if IS_VARLEN:
+        bos, eos = tl.load(cu_seqlens + i_n).to(tl.int32), tl.load(
+            cu_seqlens + i_n + 1
+        ).to(tl.int32)
+        T = eos - bos
+        NT = tl.cdiv(T, BT)
+        boh = tl.load(chunk_offsets + i_n).to(tl.int32)
+    else:
+        bos, eos = i_n * T, i_n * T + T
+        NT = tl.cdiv(T, BT)
+        boh = i_n * NT
 
-    Parametrizes over ``PERF_PARAMS`` (= ``PREFILL_PARAMS`` plus every
-    trace shape from ``ganyi_bench_k5_gdr_inline.py`` not already in
-    the representative subset, each tagged ``pytest.mark.slow``). The
-    slow trace shapes are skipped by default; pass ``--run-slow`` to
-    opt in. See ``aiter/ops/flydsl/conftest.py`` for the ``--run-slow``
-    flag and ``slow`` marker registration.
-    """
+    b_h1 = tl.zeros([64, BV], dtype=tl.float32)
+    if K > 64:
+        b_h2 = tl.zeros([64, BV], dtype=tl.float32)
+    if K > 128:
+        b_h3 = tl.zeros([64, BV], dtype=tl.float32)
+    if K > 192:
+        b_h4 = tl.zeros([64, BV], dtype=tl.float32)
 
-    @pytest.mark.parametrize("args", PERF_PARAMS, ids=PERF_TEST_IDS)
-    def test_perf_comparison(self, args: PrefillArgs):
-        context_lens = args.resolve_context_lens()
-        k, w_orig, u_orig, w_c, u_c, g, h0, cu, _ = _make_inputs(
-            context_lens, args=args
-        )
-        total_tokens = sum(context_lens)
+    h += ((boh * H + i_h) * K * V).to(tl.int64)
+    v += ((bos * H + i_h) * V).to(tl.int64)
+    k += ((bos * Hg + i_h // (H // Hg)) * K).to(tl.int64)
+    w += ((bos * H + i_h) * K).to(tl.int64)
+    if SAVE_NEW_VALUE:
+        v_new += ((bos * H + i_h) * V).to(tl.int64)
+    stride_v = H * V
+    stride_h = H * K * V
+    stride_k = Hg * K
+    stride_w = H * K
+    if USE_INITIAL_STATE:
+        h0 = h0 + i_nh * K * V
+    if STORE_FINAL_STATE:
+        ht = ht + i_nh * K * V
 
-        # Triton K5 host wrappers only accept f32 ``initial_state`` and always
-        # produce an f32 ``final_state``. When FlyDSL is benched with a bf16
-        # SSM state, we still want a Triton baseline for comparison, so we
-        # promote h0 to f32 once (outside the timed window) and feed it to
-        # the Triton closures. The resulting "Triton(f32) vs FlyDSL(bf16)"
-        # row answers the practical question "how much does enabling
-        # bf16-state win against the existing Triton baseline?".
-        h0_triton_vk = (
-            h0.float() if (h0 is not None and h0.dtype != torch.float32) else h0
-        )
-
-        # triton_origin_opt uses a [K, V] hidden-state layout, so its h0
-        # is the VK reference h0 transposed on the last two dims.
-        h0_origin_kv = (
-            h0_triton_vk.transpose(-2, -1).contiguous()
-            if h0_triton_vk is not None
-            else None
-        )
-
-        # K5 launch closures: each invokes the K5 host wrapper of its backend.
-        def flydsl_launch():
-            chunk_gated_delta_rule_fwd_h_flydsl(
-                k=k,
-                w=w_c,
-                u=u_c,
-                g=g,
-                initial_state=h0,
-                output_final_state=args.output_final_state,
-                cu_seqlens=cu,
+    if USE_INITIAL_STATE:
+        p_h0_1 = tl.make_block_ptr(h0, (K, V), (V, 1), (0, i_v * BV), (64, BV), (1, 0))
+        b_h1 += tl.load(p_h0_1, boundary_check=(0, 1)).to(tl.float32)
+        if K > 64:
+            p_h0_2 = tl.make_block_ptr(
+                h0, (K, V), (V, 1), (64, i_v * BV), (64, BV), (1, 0)
             )
-
-        def triton_vk_launch():
-            chunk_gated_delta_rule_fwd_h_opt_vk(
-                k=k,
-                w=w_c,
-                u=u_c,
-                g=g,
-                initial_state=h0_triton_vk,
-                output_final_state=args.output_final_state,
-                cu_seqlens=cu,
+            b_h2 += tl.load(p_h0_2, boundary_check=(0, 1)).to(tl.float32)
+        if K > 128:
+            p_h0_3 = tl.make_block_ptr(
+                h0, (K, V), (V, 1), (128, i_v * BV), (64, BV), (1, 0)
             )
-
-        # vLLM upstream K5 (chunk_delta_h.chunk_gated_delta_rule_fwd_h). Uses
-        # the same vk hidden-state layout and same final_state dtype as the
-        # aiter ``opt_vk`` wrapper, but unlike ``opt_vk`` its host wrapper
-        # infers ``H = u.shape[-2]`` (T-major), so it requires the un-permuted
-        # ``w_orig`` / ``u_orig`` -- feeding the H-major ``w_c`` / ``u_c``
-        # would make vLLM compute ``H = T`` and try to allocate a
-        # terabyte-sized ``h``. vLLM supports GQA natively, so ``k`` is also
-        # passed un-expanded. We still feed the same h0_triton_vk (fp32) as
-        # ``triton_vk_launch`` because vk hidden-state layout is identical.
-        def vllm_launch():
-            chunk_gated_delta_rule_fwd_h_vllm(
-                k=k,
-                w=w_orig,
-                u=u_orig,
-                g=g,
-                initial_state=h0_triton_vk,
-                output_final_state=args.output_final_state,
-                cu_seqlens=cu,
+            b_h3 += tl.load(p_h0_3, boundary_check=(0, 1)).to(tl.float32)
+        if K > 192:
+            p_h0_4 = tl.make_block_ptr(
+                h0, (K, V), (V, 1), (192, i_v * BV), (64, BV), (1, 0)
             )
+            b_h4 += tl.load(p_h0_4, boundary_check=(0, 1)).to(tl.float32)
 
-        def triton_origin_opt_launch():
-            # GQA-aware (uses unexpanded k) BV=16 + exp2 variant of fwd_h
-            # from the standalone bench's new pipeline. Hidden state in
-            # [K,V] layout, so it needs h0_origin_kv (h0 transposed from
-            # the VK reference layout).
-            chunk_gated_delta_rule_fwd_h_origin_opt(
-                k=k,
-                w=w_orig,
-                u=u_orig,
-                g=g,
-                initial_state=h0_origin_kv,
-                output_final_state=args.output_final_state,
-                cu_seqlens=cu,
+    for i_t in range(NT):
+        p_h1 = tl.make_block_ptr(
+            h + i_t * stride_h, (K, V), (V, 1), (0, i_v * BV), (64, BV), (1, 0)
+        )
+        tl.store(p_h1, b_h1.to(p_h1.dtype.element_ty), boundary_check=(0, 1))
+        if K > 64:
+            p_h2 = tl.make_block_ptr(
+                h + i_t * stride_h, (K, V), (V, 1), (64, i_v * BV), (64, BV), (1, 0)
             )
+            tl.store(p_h2, b_h2.to(p_h2.dtype.element_ty), boundary_check=(0, 1))
+        if K > 128:
+            p_h3 = tl.make_block_ptr(
+                h + i_t * stride_h, (K, V), (V, 1), (128, i_v * BV), (64, BV), (1, 0)
+            )
+            tl.store(p_h3, b_h3.to(p_h3.dtype.element_ty), boundary_check=(0, 1))
+        if K > 192:
+            p_h4 = tl.make_block_ptr(
+                h + i_t * stride_h, (K, V), (V, 1), (192, i_v * BV), (64, BV), (1, 0)
+            )
+            tl.store(p_h4, b_h4.to(p_h4.dtype.element_ty), boundary_check=(0, 1))
 
-        # Warmup FlyDSL once so its internal BV-autotune sweep does not
-        # leak into the timed window. Triton's own ``triton.autotune`` is
-        # already absorbed by ``_bench_fn``'s NUM_WARMUP=5 prelude, except
-        # for vLLM upstream's K5 -- its first call also runs a BV/warps/
-        # stages sweep and the 5-iter prelude is not always enough to
-        # converge the autotuner on long-T shapes. Pre-warm it once here
-        # for parity with FlyDSL so that ``us_vllm`` reflects steady-state
-        # kernel time, not the autotune sweep.
-        flydsl_launch()
-        if _HAS_VLLM_K5:
-            vllm_launch()
-        torch.cuda.synchronize()
-
-        us_fly = _bench_fn(flydsl_launch)
-        us_triton_vk = _bench_fn(triton_vk_launch)
-        us_triton_origin_opt = _bench_fn(triton_origin_opt_launch)
-        us_vllm = _bench_fn(vllm_launch) if _HAS_VLLM_K5 else float("nan")
-
-        fly_vs_vk = us_triton_vk / us_fly if us_fly > 0 else float("inf")
-        fly_vs_origin_opt = (
-            us_triton_origin_opt / us_fly if us_fly > 0 else float("inf")
+        p_w = tl.make_block_ptr(
+            w, (T, K), (stride_w, 1), (i_t * BT, 0), (BT, 64), (1, 0)
         )
-        fly_vs_vllm = (
-            us_vllm / us_fly if (us_fly > 0 and us_vllm == us_vllm) else float("nan")
+        b_w = tl.load(p_w, boundary_check=(0, 1))
+        b_v = tl.dot(b_w, b_h1.to(b_w.dtype))
+        if K > 64:
+            p_w = tl.make_block_ptr(
+                w, (T, K), (stride_w, 1), (i_t * BT, 64), (BT, 64), (1, 0)
+            )
+            b_w = tl.load(p_w, boundary_check=(0, 1))
+            b_v += tl.dot(b_w, b_h2.to(b_w.dtype))
+        if K > 128:
+            p_w = tl.make_block_ptr(
+                w, (T, K), (stride_w, 1), (i_t * BT, 128), (BT, 64), (1, 0)
+            )
+            b_w = tl.load(p_w, boundary_check=(0, 1))
+            b_v += tl.dot(b_w, b_h3.to(b_w.dtype))
+        if K > 192:
+            p_w = tl.make_block_ptr(
+                w, (T, K), (stride_w, 1), (i_t * BT, 192), (BT, 64), (1, 0)
+            )
+            b_w = tl.load(p_w, boundary_check=(0, 1))
+            b_v += tl.dot(b_w, b_h4.to(b_w.dtype))
+        p_v = tl.make_block_ptr(
+            v, (T, V), (stride_v, 1), (i_t * BT, i_v * BV), (BT, BV), (1, 0)
         )
+        b_v = tl.load(p_v, boundary_check=(0, 1)) - b_v
 
-        _perf_results.append(
-            {
-                "Model": args.model_name or "-",
-                "TP": args.tp,
-                "K": args.K,
-                "V": args.V,
-                "Hg": args.Hg,
-                "H": args.H,
-                "SeqLen": args.full_prompt_len,
-                "T": total_tokens,
-                "varlen": args.is_varlen,
-                "final_st": args.output_final_state,
-                "state": "bf16" if args.ssm_state_dtype == torch.bfloat16 else "fp32",
-                "FlyDSL_vk(us)": us_fly,
-                "Triton_vk(us)": us_triton_vk,
-                "Triton_origin_opt(us)": us_triton_origin_opt,
-                "vLLM_vk(us)": us_vllm,
-                "flydsl_vs_vk": fly_vs_vk,
-                "flydsl_vs_origin_opt": fly_vs_origin_opt,
-                "flydsl_vs_vllm": fly_vs_vllm,
-            }
-        )
+        if SAVE_NEW_VALUE:
+            p_v2 = tl.make_block_ptr(
+                v_new, (T, V), (stride_v, 1), (i_t * BT, i_v * BV), (BT, BV), (1, 0)
+            )
+            tl.store(p_v2, b_v.to(p_v2.dtype.element_ty), boundary_check=(0, 1))
 
-
-def _print_perf_table():
-    if not _perf_results:
-        return
-
-    # Columns: compact layout using short names.
-    # (display_name, data_key, width)
-    cols = [
-        ("Model", "Model", 16),
-        ("TP", "TP", 3),
-        ("Hg", "Hg", 3),
-        ("H", "H", 3),
-        ("SeqLen", "SeqLen", 7),
-        ("T", "T", 7),
-        ("var", "varlen", 3),
-        ("fs", "final_st", 3),
-        ("FlyDSL", "FlyDSL_vk(us)", 8),
-        ("Tri_vk", "Triton_vk(us)", 8),
-        ("Tri_orig_opt", "Triton_origin_opt(us)", 12),
-        ("vLLM", "vLLM_vk(us)", 8),
-        ("fly/vk", "flydsl_vs_vk", 7),
-        ("fly/o_opt", "flydsl_vs_origin_opt", 9),
-        ("fly/vllm", "flydsl_vs_vllm", 8),
-    ]
-    header = " | ".join(display.rjust(width) for display, _, width in cols)
-    sep = "-+-".join("-" * width for _, _, width in cols)
-    border = "=" * len(header)
-
-    def _fmt_row(row):
-        cells = []
-        for display, key, width in cols:
-            val = row[key]
-            if isinstance(val, bool):
-                cells.append(("Y" if val else "N").rjust(width))
-            elif isinstance(val, float):
-                if val != val:  # NaN (e.g. vLLM column when vllm not installed)
-                    cells.append("-".rjust(width))
-                elif "_vs_" in key:
-                    cells.append(f"{val:.2f}x".rjust(width))
-                else:
-                    cells.append(f"{val:.1f}".rjust(width))
+        last_idx = min((i_t + 1) * BT, T) - 1
+        if USE_G:
+            m_t = (i_t * BT + tl.arange(0, BT)) < T
+            b_g_last = tl.load(g + (bos * H + last_idx * H + i_h).to(tl.int64)).to(
+                tl.float32
+            )
+            p_g = tl.make_block_ptr(
+                g + bos * H + i_h, (T,), (H,), (i_t * BT,), (BT,), (0,)
+            )
+            b_g = tl.load(p_g, boundary_check=(0,)).to(tl.float32)
+            if USE_EXP2:
+                b_v = b_v * tl.where(m_t, _exp2(b_g_last - b_g), 0)[:, None]
+                b_g_last = _exp2(b_g_last)
             else:
-                cells.append(str(val).rjust(width))
-        return " | ".join(cells)
+                b_v = b_v * tl.where(m_t, _exp(b_g_last - b_g), 0)[:, None]
+                b_g_last = _exp(b_g_last)
+            b_h1 = b_h1 * b_g_last
+            if K > 64:
+                b_h2 = b_h2 * b_g_last
+            if K > 128:
+                b_h3 = b_h3 * b_g_last
+            if K > 192:
+                b_h4 = b_h4 * b_g_last
 
-    # Bucket rows by SSM-state dtype, keeping each bucket's ordering
-    # consistent with the original ``_perf_results.append`` order so that
-    # rows line up with the parametrize id order.
-    rows_fp32 = [r for r in _perf_results if r["state"] == "fp32"]
-    rows_bf16 = [r for r in _perf_results if r["state"] == "bf16"]
+        b_v = b_v.to(k.dtype.element_ty)
+        p_k = tl.make_block_ptr(
+            k, (K, T), (1, stride_k), (0, i_t * BT), (64, BT), (0, 1)
+        )
+        b_k = tl.load(p_k, boundary_check=(0, 1))
+        b_h1 += tl.dot(b_k, b_v)
+        if K > 64:
+            p_k = tl.make_block_ptr(
+                k, (K, T), (1, stride_k), (64, i_t * BT), (64, BT), (0, 1)
+            )
+            b_k = tl.load(p_k, boundary_check=(0, 1))
+            b_h2 += tl.dot(b_k, b_v)
+        if K > 128:
+            p_k = tl.make_block_ptr(
+                k, (K, T), (1, stride_k), (128, i_t * BT), (64, BT), (0, 1)
+            )
+            b_k = tl.load(p_k, boundary_check=(0, 1))
+            b_h3 += tl.dot(b_k, b_v)
+        if K > 192:
+            p_k = tl.make_block_ptr(
+                k, (K, T), (1, stride_k), (192, i_t * BT), (64, BT), (0, 1)
+            )
+            b_k = tl.load(p_k, boundary_check=(0, 1))
+            b_h4 += tl.dot(b_k, b_v)
 
-    lines = ["", border]
-    lines.append(
-        "K5 Prefill Performance Summary "
-        "(K5 device kernel time only, via torch.profiler)"
+    if STORE_FINAL_STATE:
+        p_ht = tl.make_block_ptr(ht, (K, V), (V, 1), (0, i_v * BV), (64, BV), (1, 0))
+        tl.store(p_ht, b_h1.to(p_ht.dtype.element_ty), boundary_check=(0, 1))
+        if K > 64:
+            p_ht = tl.make_block_ptr(
+                ht, (K, V), (V, 1), (64, i_v * BV), (64, BV), (1, 0)
+            )
+            tl.store(p_ht, b_h2.to(p_ht.dtype.element_ty), boundary_check=(0, 1))
+
+
+_TRITON_ORIGIN_OPT_KERNEL = chunk_gated_delta_rule_fwd_kernel_h_origin_opt
+
+
+def chunk_gated_delta_rule_fwd_h_origin_opt(
+    k,
+    w,
+    u,
+    g=None,
+    initial_state=None,
+    output_final_state=False,
+    cu_seqlens=None,
+):
+    """``triton_origin_opt`` K5: USE_EXP2 + autotuned BV/warps/stages variant.
+
+    Mirrors the standalone bench's ``fwd_h`` host wrapper but adds a
+    Triton autotune sweep over ``BV ? {16, 32, 64}``, ``num_warps ?
+    {2, 4}``, ``num_stages ? {1, 2, 3}``. Keyed on ``(H, Hg, K, V, BT,
+    IS_VARLEN)`` so each shape picks its own best config on first run.
+
+    Inputs use the GQA layout from PREFILL_PARAMS unchanged -- since this
+    K5 kernel accepts ``Hg`` directly, no ``repeat_interleave`` is needed
+    (unlike the original ``chunk_gated_delta_rule_fwd_h``, which is
+    MHA-only).
+
+    NOTE: The RCP_LN2 scale required by USE_EXP2=True is applied here so
+    that callers can pass the same per-chunk-cumsum ``g`` as the other
+    K5 wrappers. This scale is a cheap elementwise multiply and is
+    excluded from the kernel-time measurement when ``_bench_fn`` profiles
+    only the kernel launch.
+    """
+    import triton as _triton
+
+    B, T, Hg, K = k.shape
+    V = u.shape[-1]
+    H = u.shape[-2]
+    BT = 64
+    if cu_seqlens is None:
+        N, NT, chunk_offsets = B, _triton.cdiv(T, BT), None
+    else:
+        from aiter.ops.triton._triton_kernels.gated_delta_rule.prefill.chunk_delta_h import (
+            prepare_chunk_indices,
+            prepare_chunk_offsets,
+        )
+
+        chunk_indices = prepare_chunk_indices(cu_seqlens, BT)
+        N = len(cu_seqlens) - 1
+        NT = len(chunk_indices)
+        chunk_offsets = prepare_chunk_offsets(cu_seqlens, BT)
+
+    h = k.new_empty(B, NT, H, K, V)
+    v_new = torch.empty_like(u)
+    final_state = (
+        k.new_empty(N, H, K, V, dtype=torch.float32) if output_final_state else None
     )
-    lines.append(
-        "  Triton K5 references always use fp32 SSM state; only FlyDSL's "
-        "SSM-state dtype changes between the two tables below."
+
+    # USE_EXP2=True expects gates pre-scaled by 1/ln(2). Cheap elementwise
+    # op; excluded from kernel time when profiled via torch.profiler.
+    g_scaled = g * _RCP_LN2 if g is not None else None
+
+    def grid(meta):
+        return (_triton.cdiv(V, meta["BV"]), N * H)
+
+    _TRITON_ORIGIN_OPT_KERNEL[grid](
+        k=k,
+        v=u,
+        w=w,
+        v_new=v_new,
+        g=g_scaled,
+        gk=None,
+        h=h,
+        h0=initial_state,
+        ht=final_state,
+        cu_seqlens=cu_seqlens,
+        chunk_offsets=chunk_offsets,
+        T=T,
+        H=H,
+        Hg=Hg,
+        K=K,
+        V=V,
+        BT=BT,
+        USE_EXP2=True,
     )
-    lines.append(border)
-
-    def _emit_subtable(title, rows):
-        if not rows:
-            return
-        lines.append("")
-        lines.append(title)
-        lines.append(sep)
-        lines.append(header)
-        lines.append(sep)
-        for row in rows:
-            lines.append(_fmt_row(row))
-        lines.append(sep)
-
-    _emit_subtable("[FlyDSL SSM state = fp32]", rows_fp32)
-    _emit_subtable("[FlyDSL SSM state = bf16]", rows_bf16)
-    lines.append("")
-    print("\n".join(lines))
-
-
-@pytest.fixture(scope="session", autouse=True)
-def _print_summary_table(request):
-    """Print the summary performance table after all tests finish."""
-    yield
-    _print_perf_table()
+    return h, v_new, final_state
