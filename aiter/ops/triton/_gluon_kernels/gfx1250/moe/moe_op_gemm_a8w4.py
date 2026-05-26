@@ -390,19 +390,11 @@ def _moe_gemm_a8w4(
             w_scales_buffer.index(write_idx % NUM_BUFFERS),
         )
         if is_x_microscaled:
-            if GatherIndx is None:
-                gl.amd.gfx1250.tdm.async_load(
-                    x_scales_desc,
-                    [off_x_m, write_idx * MX_SCALE_BLOCK_K],
-                    x_scales_buffer.index(write_idx % NUM_BUFFERS),
-                )
-            else:
-                gl.amd.gfx1250.tdm.async_gather(
-                    x_scales_desc,
-                    offs_x_m,
-                    write_idx * MX_SCALE_BLOCK_K,
-                    x_scales_buffer.index(write_idx % NUM_BUFFERS),
-                )
+            gl.amd.gfx1250.tdm.async_load(
+                x_scales_desc,
+                [off_x_m, write_idx * MX_SCALE_BLOCK_K],
+                x_scales_buffer.index(write_idx % NUM_BUFFERS),
+            )
         write_idx += 1
 
     num_k_iter = tl.cdiv(K, BLOCK_K)
@@ -467,19 +459,11 @@ def _moe_gemm_a8w4(
             w_scales_buffer.index(write_idx % NUM_BUFFERS),
         )
         if is_x_microscaled:
-            if GatherIndx is None:
-                gl.amd.gfx1250.tdm.async_load(
-                    x_scales_desc,
-                    [off_x_m, write_idx * MX_SCALE_BLOCK_K],
-                    x_scales_buffer.index(write_idx % NUM_BUFFERS),
-                )
-            else:
-                gl.amd.gfx1250.tdm.async_gather(
-                    x_scales_desc,
-                    offs_x_m,
-                    write_idx * MX_SCALE_BLOCK_K,
-                    x_scales_buffer.index(write_idx % NUM_BUFFERS),
-                )
+            gl.amd.gfx1250.tdm.async_load(
+                x_scales_desc,
+                [off_x_m, write_idx * MX_SCALE_BLOCK_K],
+                x_scales_buffer.index(write_idx % NUM_BUFFERS),
+            )
         write_idx += 1
 
         gl.amd.gfx1250.tdm.async_wait((NUM_BUFFERS - 1) * NUM_TDM_OPS)
