@@ -1440,9 +1440,9 @@ def test_qk_norm_rope_cache_block_quant(
     for i in range(batch_size):
         cu_q_len[i + 1] = cu_q_len[i] + seq_lens[i]
     #
-    assert cu_q_len[-1].item() == num_tokens, (
-        f"cu_q_len[-1]={cu_q_len[-1].item()} != num_tokens={num_tokens}"
-    )
+    assert (
+        cu_q_len[-1].item() == num_tokens
+    ), f"cu_q_len[-1]={cu_q_len[-1].item()} != num_tokens={num_tokens}"
     #
     # slot_mapping: each batch maps to disjoint blocks (no cross-batch block sharing)
     slot_start_per_batch = []
@@ -1854,9 +1854,9 @@ def test_qk_norm_rope_cache_block_quant(
         decode2_page_base = (last_used_slot + page_size) // page_size * page_size
         num_blocks * page_size
         pages_needed = batch_size * 2 + (decode2_page_base // page_size)
-        assert pages_needed <= num_blocks, (
-            f"decode2 needs {pages_needed} pages but num_blocks={num_blocks}. Increase -b."
-        )
+        assert (
+            pages_needed <= num_blocks
+        ), f"decode2 needs {pages_needed} pages but num_blocks={num_blocks}. Increase -b."
         decode2_slots = []
         for bsID in range(batch_size):
             start_slot = (
@@ -1982,9 +1982,9 @@ def test_qk_norm_rope_cache_block_quant(
 
         decode3_page_base = decode2_page_base + batch_size * 2 * page_size
         pages_needed_d3 = batch_size + (decode3_page_base // page_size)
-        assert pages_needed_d3 <= num_blocks, (
-            f"decode3 needs {pages_needed_d3} pages but num_blocks={num_blocks}. Increase -b."
-        )
+        assert (
+            pages_needed_d3 <= num_blocks
+        ), f"decode3 needs {pages_needed_d3} pages but num_blocks={num_blocks}. Increase -b."
         decode3_slots = []
         for bsID in range(batch_size):
             base_slot = decode3_page_base + bsID * page_size
@@ -2180,9 +2180,9 @@ def test_mixed_prefill_decode_block_quant(
         slot_start_per_batch.append(next_slot)
         blocks_needed = (seq_lens[i] + page_size - 1) // page_size
         next_slot += blocks_needed * page_size
-    assert next_slot <= num_blocks * page_size, (
-        f"Need {next_slot // page_size} pages but num_blocks={num_blocks}. Increase -b."
-    )
+    assert (
+        next_slot <= num_blocks * page_size
+    ), f"Need {next_slot // page_size} pages but num_blocks={num_blocks}. Increase -b."
 
     slot_mapping = torch.zeros(num_tokens, dtype=torch.int64, device="cuda")
     for i in range(batch_size):
