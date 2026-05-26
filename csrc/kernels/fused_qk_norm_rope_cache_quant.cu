@@ -145,7 +145,8 @@ inline ActivationStrides3D activation_strides_logical_3d(
      float* v_scale,        // Value scale for quantized value cache [num_blocks, block_size]
      int const num_tokens,  // Number of tokens
      int const page_size,   // Page size for kv cache
-     int x                  // kv cache tiling size
+    int x,                 // kv cache tiling size
+    int const rotary_dim   // Rotary span (concatenated cos+sin width); <= head_dim
  )
  {
  
@@ -243,11 +244,12 @@ inline ActivationStrides3D activation_strides_logical_3d(
          // Apply RoPE to normalized elements
  
          int64_t pos_id = position_ids[tokenIdx];
+        int const rotary_span = rotary_dim > 0 ? rotary_dim : head_dim;
+        int const embed_dim   = rotary_span / 2;
  
          // Calculate cache pointer for this position - similar to
          // pos_encoding_kernels.cu
-         scalar_t const* cache_ptr = cos_sin_cache + pos_id * head_dim;
-         int const embed_dim       = head_dim / 2;
+        scalar_t const* cache_ptr = cos_sin_cache + pos_id * rotary_span;
          scalar_t const* cos_ptr   = cache_ptr;
          scalar_t const* sin_ptr   = cache_ptr + embed_dim;
  
@@ -259,17 +261,19 @@ inline ActivationStrides3D activation_strides_logical_3d(
              {
                  int const idx0 = 2 * i;
                  int const idx1 = 2 * i + 1;
+                int const dim0 = laneId * numElemsPerThread + idx0;
  
-                 float const val0 = elements[idx0];
-                 float const val1 = elements[idx1];
- 
-                 int const dim_idx  = laneId * numElemsPerThread + idx0;
-                 int const half_dim = dim_idx / 2;
-                 float cos_val      = static_cast<float>(cos_ptr[half_dim]);
-                 float sin_val      = static_cast<float>(sin_ptr[half_dim]);
- 
-                 elements[idx0] = static_cast<scalar_t>(val0 * cos_val - val1 * sin_val);
-                 elements[idx1] = static_cast<scalar_t>(val0 * sin_val + val1 * cos_val);
+                if(dim0 + 1 < rotary_span)
+                {
+                    float const val0 = elements[idx0];
+                    float const val1 = elements[idx1];
+                    int const half_dim = dim0 / 2;
+                    float cos_val = static_cast<float>(cos_ptr[half_dim]);
+                    float sin_val = static_cast<float>(sin_ptr[half_dim]);
+
+                    elements[idx0] = static_cast<scalar_t>(val0 * cos_val - val1 * sin_val);
+                    elements[idx1] = static_cast<scalar_t>(val0 * sin_val + val1 * cos_val);
+                }
              }
          }
          else
@@ -277,25 +281,29 @@ inline ActivationStrides3D activation_strides_logical_3d(
              scalar_t elements2[numElemsPerThread]; // Additional buffer required for RoPE.
              // Before data exchange with in warp, we need to sync.
              __syncwarp();
+            int const partner_lane_delta = embed_dim / numElemsPerThread;
              // Get the data from the other half of the warp. Use pre-computed cos/sin
              // values.
  #pragma unroll
              for(int i = 0; i < numElemsPerThread; i++)
              {
-                 elements2[i] = static_cast<scalar_t>(__shfl_xor(float(elements[i]), 16, 32));
-                 if(laneId < 16)
+                int const dim_idx = laneId * numElemsPerThread + i;
+                if(dim_idx < rotary_span)
                  {
-                     elements2[i] = -elements2[i];
-                 }
- 
-                 int dim_idx  = laneId * numElemsPerThread + i;
-                 dim_idx      = (dim_idx * 2) % head_dim;
-                 int half_dim = dim_idx / 2;
-                 // Use pre-computed cos/sin from cache
-                 float cos_val = cos_ptr[half_dim];
-                 float sin_val = sin_ptr[half_dim];
- 
-                 elements[i] = static_cast<scalar_t>(elements[i] * cos_val + elements2[i] * sin_val);
+                    elements2[i] = static_cast<scalar_t>(
+                        __shfl_xor(float(elements[i]), partner_lane_delta, 32));
+                    if(dim_idx < embed_dim)
+                    {
+                        elements2[i] = -elements2[i];
+                    }
+
+                    int const half_dim = dim_idx % embed_dim;
+                    float cos_val = static_cast<float>(cos_ptr[half_dim]);
+                    float sin_val = static_cast<float>(sin_ptr[half_dim]);
+
+                    elements[i] = static_cast<scalar_t>(
+                        elements[i] * cos_val + elements2[i] * sin_val);
+                }
              }
              __syncwarp();
          }
@@ -1002,6 +1010,7 @@ inline ActivationStrides3D activation_strides_logical_3d(
                                              float* v_scale,
                                              int page_size,
                                              int x,
+                                            int const rotary_dim,
                                              hipStream_t stream)
  {
      // make sure no thread is wasted, adopt 64 here
@@ -1052,7 +1061,8 @@ inline ActivationStrides3D activation_strides_logical_3d(
                                                     v_scale,
                                                     num_tokens,
                                                     page_size,
-                                                    x);
+                                                    x,
+                                                    rotary_dim);
          });
          break;
      case 128:
@@ -1092,7 +1102,8 @@ inline ActivationStrides3D activation_strides_logical_3d(
                                                     v_scale,
                                                     num_tokens,
                                                     page_size,
-                                                    x);
+                                                    x,
+                                                    rotary_dim);
          });
          break;
      case 256:
@@ -1132,7 +1143,8 @@ inline ActivationStrides3D activation_strides_logical_3d(
                                                     v_scale,
                                                     num_tokens,
                                                     page_size,
-                                                    x);
+                                                    x,
+                                                    rotary_dim);
          });
          break;
      default: TORCH_CHECK(false, "Unsupported head dimension for fusedQKNormRope: ", head_dim);
@@ -1329,6 +1341,7 @@ void launchFusedQKNormRopeBlockQuantCacheShuffle(scalar_t* qkv,
         v_scale.has_value() ? v_scale->data_ptr<float>() : nullptr,                             \
         page_size,                                                                                \
         x,                                                                                        \
+        rotary_dim_,                                                                              \
         stream);
 
 template <typename T, int HEAD_SIZE, bool IS_NEOX>
@@ -1634,7 +1647,7 @@ void fused_qk_norm_rope_cache_quant_shuffle(
     at::Tensor& slot_mapping,          // slot mapping
     const std::string& kv_cache_dtype, // kv cache data type
     std::optional<at::Tensor> k_scale, // k scale tensor for quantized k cache
-    std::optional<at::Tensor> v_scale,  // v scale tensor for quantized v cache
+    std::optional<at::Tensor> v_scale, // v scale tensor for quantized v cache
     std::optional<at::Tensor> opt_q,    // [num_tokens, num_heads_q * head_dim] (preferred)
     std::optional<at::Tensor> opt_k,    // [num_tokens, num_heads_k * head_dim]
     std::optional<at::Tensor> opt_v     // [num_tokens, num_heads_v * head_dim]
@@ -1663,10 +1676,31 @@ void fused_qk_norm_rope_cache_quant_shuffle(
     TORCH_CHECK(position_ids.dim() == 1, "Position IDs must be 1D: [num_tokens]");
     TORCH_CHECK(q_weight.dim() == 1, "Query weights must be 1D: [head_dim]");
     TORCH_CHECK(k_weight.dim() == 1, "Key weights must be 1D: [head_dim]");
-    TORCH_CHECK(cos_sin_cache.dim() == 2, "Cos/sin cache must be 2D: [max_position, head_dim]");
+    TORCH_CHECK(cos_sin_cache.dim() == 2, "Cos/sin cache must be 2D: [max_position, rotary_dim]");
     TORCH_CHECK(q_weight.size(0) == head_dim, "Query weights size must match head dimension");
     TORCH_CHECK(k_weight.size(0) == head_dim, "Key weights size must match head dimension");
-    TORCH_CHECK(cos_sin_cache.size(1) == head_dim, "Cos/sin cache dimension must match head_dim");
+    int64_t const rotary_dim_ = cos_sin_cache.size(1);
+    TORCH_CHECK(rotary_dim_ > 0, "rotary_dim must be positive");
+    TORCH_CHECK(rotary_dim_ <= head_dim,
+                "rotary_dim (",
+                rotary_dim_,
+                ") must be <= head_dim (",
+                head_dim,
+                ")");
+    TORCH_CHECK(rotary_dim_ % 2 == 0, "rotary_dim must be even");
+    TORCH_CHECK(cos_sin_cache.size(1) == rotary_dim_,
+                "Cos/sin cache dimension must match rotary_dim");
+    if(is_neox)
+    {
+        int64_t const num_elems_per_thread = head_dim / 32;
+        TORCH_CHECK(
+            (rotary_dim_ / 2) % num_elems_per_thread == 0,
+            "For NeoX-style partial rotary, rotary_dim/2 (",
+            rotary_dim_ / 2,
+            ") must be divisible by head_dim/32 (",
+            num_elems_per_thread,
+            ")");
+    }
     TORCH_CHECK(head_dim % 32 == 0,
                 "Head dimension must be multiple of 32 for fused QK Norm RoPE kernel");
     TORCH_CHECK(

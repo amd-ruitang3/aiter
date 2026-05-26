@@ -25,7 +25,7 @@ void fused_qk_norm_rope_cache_quant_shuffle(
     at::Tensor& slot_mapping,          // slot mapping
     const std::string& kv_cache_dtype, // kv cache data type
     std::optional<at::Tensor> k_scale, // k scale tensor for quantized k cache
-    std::optional<at::Tensor> v_scale,  // v scale tensor for quantized v cache
+    std::optional<at::Tensor> v_scale, // v scale tensor for quantized v cache
     std::optional<at::Tensor> opt_q = c10::nullopt, // 2D [T, Hq*D] or 3D [T, Hq, D]; arbitrary strides (kernel uses scalar path if dim stride != 1)
     std::optional<at::Tensor> opt_k = c10::nullopt, // 2D [T, Hk*D] or 3D [T, Hk, D]
     std::optional<at::Tensor> opt_v = c10::nullopt  // 2D [T, Hv*D] or 3D [T, Hv, D]
