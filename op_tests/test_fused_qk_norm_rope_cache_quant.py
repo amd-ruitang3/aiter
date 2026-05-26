@@ -52,16 +52,27 @@ def apply_rotary_emb_torch(
 
 
 def apply_rotary_emb_dispatch(
-    x: Tensor, cos: Tensor, sin: Tensor, is_neox_style: bool
+    x: Tensor,
+    cos: Tensor,
+    sin: Tensor,
+    is_neox_style: bool,
+    rotary_dim: int = 0,
 ) -> Tensor:
     """
     Args:
         x: [num_tokens, num_heads, head_size]
-        cos: [num_tokens, head_size // 2]
-        sin: [num_tokens, head_size // 2]
+        cos: [num_tokens, rotary_dim // 2]
+        sin: [num_tokens, rotary_dim // 2]
         is_neox_style: Whether to use the Neox-style or GPT-J-style rotary
             positional embeddings.
+        rotary_dim: 0 means full rotary; otherwise only the first rotary_dim
+            channels are rotated.
     """
+    head_size = x.shape[-1]
+    rotary_dim_ = rotary_dim if rotary_dim > 0 else head_size
+    if rotary_dim_ < head_size:
+        x_rot = apply_rotary_emb_torch(x[..., :rotary_dim_], cos, sin, is_neox_style)
+        return torch.cat((x_rot, x[..., rotary_dim_:]), dim=-1)
     return apply_rotary_emb_torch(x, cos, sin, is_neox_style)
 
 
@@ -70,7 +81,7 @@ def run_torch_qk_norm_rope_cache_quant_shuffle(
     qkv: Tensor,  # contiguous (num_tokens * (num_heads_q + num_heads_k + num_heads_v) * head_size)
     qw: Tensor,  #  contiguous (head_size)
     kw: Tensor,  #  contiguous (head_size)
-    cos_sin: Tensor,  # contiguous (max_positions * head_size)
+    cos_sin: Tensor,  # contiguous (max_positions * rotary_dim), rotary_dim <= head_size
     positions: Tensor,  # contiguous (3 * num_tokens) or (num_tokens)
     num_tokens: int,
     num_heads_q: int,
@@ -100,18 +111,19 @@ def run_torch_qk_norm_rope_cache_quant_shuffle(
     k_by_head = rms_norm_forward(k_by_head, kw, eps)
     k = k_by_head.view(k.shape)
 
-    cos_sin = cos_sin.view(cos_sin.shape[0], head_size)
+    rotary_dim = cos_sin.shape[-1]
+    cos_sin = cos_sin.view(cos_sin.shape[0], rotary_dim)
     cos_sin = cos_sin[positions]
     cos, sin = cos_sin.chunk(2, dim=-1)
 
     q_shape = q.shape
     q = q.view(num_tokens, -1, head_size)
-    q = apply_rotary_emb_dispatch(q, cos, sin, is_neox_style)
+    q = apply_rotary_emb_dispatch(q, cos, sin, is_neox_style, rotary_dim)
     q = q.reshape(q_shape)
 
     k_shape = k.shape
     k = k.view(num_tokens, -1, head_size)
-    k = apply_rotary_emb_dispatch(k, cos, sin, is_neox_style)
+    k = apply_rotary_emb_dispatch(k, cos, sin, is_neox_style, rotary_dim)
 
     v = v.view(num_tokens, -1, head_size)
 
@@ -615,7 +627,7 @@ def run_torch_qk_norm_rope_cache_block_quant_shuffle(
     qkv: Tensor,  # contiguous (num_tokens * (num_heads_q + num_heads_k + num_heads_v) * head_size)
     qw: Tensor,  #  contiguous (head_size)
     kw: Tensor,  #  contiguous (head_size)
-    cos_sin: Tensor,  # contiguous (max_positions * head_size)
+    cos_sin: Tensor,  # contiguous (max_positions * rotary_dim), rotary_dim <= head_size
     positions: Tensor,  # contiguous (3 * num_tokens) or (num_tokens)
     num_tokens: int,
     num_heads_q: int,
@@ -645,18 +657,19 @@ def run_torch_qk_norm_rope_cache_block_quant_shuffle(
     k_by_head = rms_norm_forward(k_by_head, kw, eps)
     k = k_by_head.view(k.shape)
 
-    cos_sin = cos_sin.view(cos_sin.shape[0], head_size)
+    rotary_dim = cos_sin.shape[-1]
+    cos_sin = cos_sin.view(cos_sin.shape[0], rotary_dim)
     cos_sin = cos_sin[positions]
     cos, sin = cos_sin.chunk(2, dim=-1)
 
     q_shape = q.shape
     q = q.view(num_tokens, -1, head_size)
-    q = apply_rotary_emb_dispatch(q, cos, sin, is_neox_style)
+    q = apply_rotary_emb_dispatch(q, cos, sin, is_neox_style, rotary_dim)
     q = q.reshape(q_shape)
 
     k_shape = k.shape
     k = k.view(num_tokens, -1, head_size)
-    k = apply_rotary_emb_dispatch(k, cos, sin, is_neox_style)
+    k = apply_rotary_emb_dispatch(k, cos, sin, is_neox_style, rotary_dim)
 
     v = v.view(num_tokens, -1, head_size)
 
@@ -846,12 +859,16 @@ def test_qk_norm_rope_cache_quant(
     num_blocks,
     page_size,
     max_positions: int = 10000,
+    rotary_dim: int = 0,
 ):
     # Construct tensors inside the function
     if kv_cache_dtype == "fp8_e4m3":
         cache_dtype = get_dtype_fp8()
     else:
         cache_dtype = dtype
+    rotary_dim_ = rotary_dim if rotary_dim > 0 else head_size
+    assert rotary_dim_ <= head_size
+    assert rotary_dim_ % 2 == 0
 
     k_cache = torch.randn(
         [num_blocks, page_size, num_heads_k, head_size],
@@ -886,7 +903,7 @@ def test_qk_norm_rope_cache_quant(
     )
     qw = torch.randn(head_size, dtype=dtype, device="cuda")
     kw = torch.randn(head_size, dtype=dtype, device="cuda")
-    cos_sin = torch.randn((max_positions, head_size), dtype=dtype, device="cuda")
+    cos_sin = torch.randn((max_positions, rotary_dim_), dtype=dtype, device="cuda")
     pos_shape = (num_tokens,)
     positions = torch.randint(
         0, max_positions, pos_shape, dtype=torch.int64, device="cuda"
@@ -938,6 +955,8 @@ def test_qk_norm_rope_cache_quant(
     )
 
     info = f"dtype:{dtype}, num_tokens:{num_tokens}, num_heads_q:{num_heads_q}, num_heads_k:{num_heads_k}, num_heads_v:{num_heads_v}, head_size:{head_size}, is_neox_style:{is_neox_style}"
+    if rotary_dim > 0:
+        info += f", rotary_dim:{rotary_dim_}"
     msg = f"[perf] === {info} === torch avg: {avg_torch:<8.2f} us, cu avg: {avg_cu:<8.2f} us, uplift: {avg_torch / avg_cu - 1:<5.1%}"
     checkAllclose(q_ref, q, msg="q", rtol=1e-2, atol=0.05)
     checkAllclose(k_ref, k, msg="k", rtol=1e-2, atol=0.05)
@@ -953,6 +972,7 @@ def test_qk_norm_rope_cache_quant(
     ret = {}
     ret["fused_qk_us"] = avg_cu
     ret["unfused_us"] = avg_torch
+    ret["rotary_dim"] = rotary_dim_
     ret["aiter_bw(TB/s)"] = (
         num_tokens
         * (num_heads_k + num_heads_v + num_heads_q)
@@ -1313,7 +1333,7 @@ def test_qk_norm_rope_2way(
 
     info = f"dtype:{dtype}, batch_size:{batch_size}, num_tokens0:{num_tokens0}, num_tokens1:{num_tokens1}, num_heads_q:{num_heads_q}, num_heads_k:{num_heads_k}"
     info += f", head_size:{head_size}, is_interleaved:{is_interleaved}, eps:{eps}"
-    msg = f"[perf] === {info} === torch avg: {avg_torch:<8.2f} us, cu avg: {avg_cu:<8.2f} us, uplift: {avg_torch/avg_cu-1:<5.1%}"
+    msg = f"[perf] === {info} === torch avg: {avg_torch:<8.2f} us, cu avg: {avg_cu:<8.2f} us, uplift: {avg_torch / avg_cu - 1:<5.1%}"
     checkAllclose(q01_ref, q01, msg="q01", rtol=1e-2, atol=0.05)
     checkAllclose(k01_ref, k01, msg="k01", rtol=1e-2, atol=0.05)
     print(msg, flush=True)
@@ -1420,9 +1440,9 @@ def test_qk_norm_rope_cache_block_quant(
     for i in range(batch_size):
         cu_q_len[i + 1] = cu_q_len[i] + seq_lens[i]
     #
-    assert (
-        cu_q_len[-1].item() == num_tokens
-    ), f"cu_q_len[-1]={cu_q_len[-1].item()} != num_tokens={num_tokens}"
+    assert cu_q_len[-1].item() == num_tokens, (
+        f"cu_q_len[-1]={cu_q_len[-1].item()} != num_tokens={num_tokens}"
+    )
     #
     # slot_mapping: each batch maps to disjoint blocks (no cross-batch block sharing)
     slot_start_per_batch = []
@@ -1613,12 +1633,15 @@ def test_qk_norm_rope_cache_block_quant(
     v_scale_chunk = v_scale.clone()
     #
     (
-        q_chunk_ref,
-        k_chunk_ref,
-        v_chunk_ref,
-        k_cache_ref,
-        v_cache_ref,
-    ), avg_torch_chunk = run_torch_qk_norm_rope_cache_block_quant_shuffle(
+        (
+            q_chunk_ref,
+            k_chunk_ref,
+            v_chunk_ref,
+            k_cache_ref,
+            v_cache_ref,
+        ),
+        avg_torch_chunk,
+    ) = run_torch_qk_norm_rope_cache_block_quant_shuffle(
         chunk_qkv,
         qw,
         kw,
@@ -1831,9 +1854,9 @@ def test_qk_norm_rope_cache_block_quant(
         decode2_page_base = (last_used_slot + page_size) // page_size * page_size
         num_blocks * page_size
         pages_needed = batch_size * 2 + (decode2_page_base // page_size)
-        assert (
-            pages_needed <= num_blocks
-        ), f"decode2 needs {pages_needed} pages but num_blocks={num_blocks}. Increase -b."
+        assert pages_needed <= num_blocks, (
+            f"decode2 needs {pages_needed} pages but num_blocks={num_blocks}. Increase -b."
+        )
         decode2_slots = []
         for bsID in range(batch_size):
             start_slot = (
@@ -1959,9 +1982,9 @@ def test_qk_norm_rope_cache_block_quant(
 
         decode3_page_base = decode2_page_base + batch_size * 2 * page_size
         pages_needed_d3 = batch_size + (decode3_page_base // page_size)
-        assert (
-            pages_needed_d3 <= num_blocks
-        ), f"decode3 needs {pages_needed_d3} pages but num_blocks={num_blocks}. Increase -b."
+        assert pages_needed_d3 <= num_blocks, (
+            f"decode3 needs {pages_needed_d3} pages but num_blocks={num_blocks}. Increase -b."
+        )
         decode3_slots = []
         for bsID in range(batch_size):
             base_slot = decode3_page_base + bsID * page_size
@@ -2157,9 +2180,9 @@ def test_mixed_prefill_decode_block_quant(
         slot_start_per_batch.append(next_slot)
         blocks_needed = (seq_lens[i] + page_size - 1) // page_size
         next_slot += blocks_needed * page_size
-    assert (
-        next_slot <= num_blocks * page_size
-    ), f"Need {next_slot // page_size} pages but num_blocks={num_blocks}. Increase -b."
+    assert next_slot <= num_blocks * page_size, (
+        f"Need {next_slot // page_size} pages but num_blocks={num_blocks}. Increase -b."
+    )
 
     slot_mapping = torch.zeros(num_tokens, dtype=torch.int64, device="cuda")
     for i in range(batch_size):
@@ -2296,7 +2319,7 @@ def apply_partial_rotary_emb(
     return torch.cat((x_rot, x_pass), dim=-1)
 
 
-def ref_partial_rotary_pts_quant(
+def ref_qk_norm_partial_rotary(
     qkv: Tensor,
     qw: Tensor,
     kw: Tensor,
@@ -2311,7 +2334,7 @@ def ref_partial_rotary_pts_quant(
     is_neox_style: bool,
     eps: float,
 ):
-    """Reference implementation: RMSNorm + partial rotary RoPE."""
+    """Reference implementation for RMSNorm + partial rotary RoPE."""
     q_size = num_heads_q * head_size
     k_size = num_heads_k * head_size
     v_size = num_heads_v * head_size
@@ -2325,8 +2348,8 @@ def ref_partial_rotary_pts_quant(
     indexed = cos_sin[positions]
     cos, sin = indexed.chunk(2, dim=-1)
 
-    q = apply_partial_rotary_emb(q, cos, sin, rotary_dim, is_neox_style)
-    k = apply_partial_rotary_emb(k, cos, sin, rotary_dim, is_neox_style)
+    q = apply_rotary_emb_dispatch(q, cos, sin, is_neox_style, rotary_dim)
+    k = apply_rotary_emb_dispatch(k, cos, sin, is_neox_style, rotary_dim)
     return q, k, v
 
 
@@ -2376,7 +2399,7 @@ def test_partial_rotary_pts_quant(
         (num_tokens, num_heads_v, head_size), dtype=dtype, device="cuda"
     )
 
-    q_ref, k_ref, v_ref = ref_partial_rotary_pts_quant(
+    q_ref, k_ref, v_ref = ref_qk_norm_partial_rotary(
         qkv,
         qw,
         kw,
@@ -2703,9 +2726,39 @@ if __name__ == "__main__":
     aiter.logger.info("qk_norm_rope_2way summary (markdown):\n%s", df_md)
 
     # partial rotary tests (Qwen3.5-style: head_size=256, rotary_dim=64)
-    df = []
-    partial_rotary_configs = {256: 64, 128: 32, 64: 16}
+    partial_rotary_configs = {256: 64, 128: 64, 64: 16}
 
+    partial_qk_df = []
+    for num_token in args.token:
+        for num_head, num_kv_head in args.head:
+            for head_size in args.head_sizes:
+                rotary_dim = partial_rotary_configs[head_size]
+                assert rotary_dim < head_size
+                for is_neox_style in args.is_neox_styles:
+                    ret = test_qk_norm_rope_cache_quant(
+                        args.dtype,
+                        num_token,
+                        num_head,
+                        num_kv_head,
+                        num_kv_head,
+                        head_size,
+                        is_neox_style,
+                        1e-6,
+                        "auto",
+                        args.num_blocks,
+                        args.page_size,
+                        max_positions=args.max_positions,
+                        rotary_dim=rotary_dim,
+                    )
+                    partial_qk_df.append(ret)
+    partial_qk_df = pd.DataFrame(partial_qk_df)
+    partial_qk_df_md = partial_qk_df.to_markdown(index=False)
+    aiter.logger.info(
+        "partial_rotary_qk_norm_rope_cache_quant summary (markdown):\n%s",
+        partial_qk_df_md,
+    )
+
+    partial_pts_df = []
     for num_token in args.token:
         for num_head, num_kv_head in args.head:
             for head_size in args.head_sizes:
@@ -2723,7 +2776,10 @@ if __name__ == "__main__":
                         is_neox_style,
                         eps=1e-6,
                     )
-                    df.append(ret)
-    df = pd.DataFrame(df)
-    df_md = df.to_markdown(index=False)
-    aiter.logger.info("partial_rotary_pts_quant summary (markdown):\n%s", df_md)
+                    partial_pts_df.append(ret)
+    partial_pts_df = pd.DataFrame(partial_pts_df)
+    partial_pts_df_md = partial_pts_df.to_markdown(index=False)
+    aiter.logger.info(
+        "partial_rotary_pts_quant summary (markdown):\n%s",
+        partial_pts_df_md,
+    )

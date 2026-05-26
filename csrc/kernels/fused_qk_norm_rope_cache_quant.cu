@@ -146,7 +146,7 @@ inline ActivationStrides3D activation_strides_logical_3d(
      int const num_tokens,  // Number of tokens
      int const page_size,   // Page size for kv cache
     int x,                 // kv cache tiling size
-    int const rotary_dim   // Rotary span (concatenated cos+sin width); <= head_dim
+    int const rotary_dim   // Rotary dimension (concatenated cos+sin width); <= head_dim
  )
  {
  
@@ -243,13 +243,12 @@ inline ActivationStrides3D activation_strides_logical_3d(
  
          // Apply RoPE to normalized elements
  
-         int64_t pos_id = position_ids[tokenIdx];
-        int const rotary_span = rotary_dim > 0 ? rotary_dim : head_dim;
-        int const embed_dim   = rotary_span / 2;
+        int64_t pos_id = position_ids[tokenIdx];
+        int const embed_dim   = rotary_dim / 2;
  
          // Calculate cache pointer for this position - similar to
          // pos_encoding_kernels.cu
-        scalar_t const* cache_ptr = cos_sin_cache + pos_id * rotary_span;
+        scalar_t const* cache_ptr = cos_sin_cache + pos_id * rotary_dim;
          scalar_t const* cos_ptr   = cache_ptr;
          scalar_t const* sin_ptr   = cache_ptr + embed_dim;
  
@@ -263,7 +262,7 @@ inline ActivationStrides3D activation_strides_logical_3d(
                  int const idx1 = 2 * i + 1;
                 int const dim0 = laneId * numElemsPerThread + idx0;
  
-                if(dim0 + 1 < rotary_span)
+                if(dim0 + 1 < rotary_dim)
                 {
                     float const val0 = elements[idx0];
                     float const val1 = elements[idx1];
@@ -288,7 +287,7 @@ inline ActivationStrides3D activation_strides_logical_3d(
              for(int i = 0; i < numElemsPerThread; i++)
              {
                 int const dim_idx = laneId * numElemsPerThread + i;
-                if(dim_idx < rotary_span)
+                if(dim_idx < rotary_dim)
                  {
                     elements2[i] = static_cast<scalar_t>(
                         __shfl_xor(float(elements[i]), partner_lane_delta, 32));
