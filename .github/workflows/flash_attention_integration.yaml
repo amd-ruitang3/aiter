@@ -312,6 +312,41 @@ jobs:
             python -c "from flash_attn.flash_attn_interface import flash_attn_func; print('flash_attn_func loaded (fake ROCm):', flash_attn_func)"
         shell: bash
 
+  # Make sure upstream users on the TheRock ROCm distribution don't hit build
+  # errors: a plain install + aiter JIT build must succeed (see FA #2580).
+  # No GPU needed (build fails at compile/link time).
+  therock_smoke:
+    if: ${{ needs.prechecks.outputs.run_triton == 'true' }}
+    name: TheRock Smoke Test
+    needs: [prechecks]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout aiter repo
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install TheRock nightly torch
+        run: |
+          python -m pip install --upgrade pip
+          pip install ninja pybind11
+          pip install --pre torch torchvision torchaudio \
+            --index-url https://rocm.nightlies.amd.com/v2/gfx110X-all/
+        shell: bash
+
+      - name: Install aiter
+        run: pip install -e . --no-build-isolation
+        shell: bash
+
+      - name: Trigger aiter JIT build
+        run: python -c "import aiter; from aiter.ops.enum import ActivationType; print('OK')"
+        shell: bash
+
   # =============================================================================
   # CK Backend
   # =============================================================================
