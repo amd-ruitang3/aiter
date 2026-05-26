@@ -262,3 +262,40 @@ def fused_qk_norm_rope_2way(
     out_q01: Tensor,
     out_k01: Tensor,
 ) -> None: ...
+
+
+@compile_ops("module_fused_qk_norm_rope_cache_quant_shuffle")
+def fused_qk_norm_rope_2way_fp8_perhead_quant(
+    q0: Tensor,
+    k0: Tensor,
+    q1: Tensor,
+    k1: Tensor,
+    w_q0: Tensor,
+    w_k0: Tensor,
+    w_q1: Tensor,
+    w_k1: Tensor,
+    cos_sin0: Tensor,
+    cos_sin1: Tensor,
+    batch_size: int,
+    num_tokens0: int,
+    num_tokens1: int,
+    num_heads_q: int,
+    num_heads_k: int,
+    head_size: int,
+    is_interleaved: bool,
+    eps: float,
+    out_q01: Optional[Tensor] = None,
+    out_k01: Optional[Tensor] = None,
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+    """Same as the pertensor variant, but with per-(batch, head) descales.
+
+    Returns (q_fp8, k_fp8, q_descale, k_descale, q_bf16, k_bf16) where
+    q_descale.shape == (batch_size, num_heads_q) and
+    k_descale.shape == (batch_size, num_heads_k). These shapes match what
+    CK FP8 flash attention accepts natively.
+    """
+    ...
+
+
+@compile_ops("module_v_per_head_fp8_quant")
+def v_per_head_fp8_quant(v: Tensor) -> tuple[Tensor, Tensor]: ...
