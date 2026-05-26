@@ -299,3 +299,12 @@ def fused_qk_norm_rope_2way_fp8_perhead_quant(
 
 @compile_ops("module_v_per_head_fp8_quant")
 def v_per_head_fp8_quant(v: Tensor) -> tuple[Tensor, Tensor]: ...
+
+
+v_per_head_fp8_quant_tiled = v_per_head_fp8_quant
+
+
+@compile_ops("module_v_per_head_fp8_quant")
+def v_2way_per_head_fp8_quant(v0: Tensor, v1: Tensor) -> tuple[Tensor, Tensor]:
+    """Per-(batch, head) FP8 quant for concatenated [v0, v1] without bf16 cat."""
+    ...
