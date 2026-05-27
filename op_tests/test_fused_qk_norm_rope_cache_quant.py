@@ -2513,17 +2513,7 @@ def test_mixed_prefill_decode_block_quant(
     return {"mixed_fused_qk_us": avg_cu, "mixed_unfused_us": avg_torch}
 
 
-def apply_partial_rotary_emb(
-    x: Tensor, cos: Tensor, sin: Tensor, rotary_dim: int, is_neox_style: bool
-) -> Tensor:
-    """Apply RoPE only to the first rotary_dim elements, pass through the rest."""
-    x_rot = x[..., :rotary_dim]
-    x_pass = x[..., rotary_dim:]
-    x_rot = apply_rotary_emb_torch(x_rot, cos, sin, is_neox_style)
-    return torch.cat((x_rot, x_pass), dim=-1)
-
-
-def ref_qk_norm_partial_rotary(
+def ref_partial_rotary_pts_quant(
     qkv: Tensor,
     qw: Tensor,
     kw: Tensor,
@@ -2538,7 +2528,7 @@ def ref_qk_norm_partial_rotary(
     is_neox_style: bool,
     eps: float,
 ):
-    """Reference implementation for RMSNorm + partial rotary RoPE."""
+    """Reference implementation: RMSNorm + partial rotary RoPE."""
     q_size = num_heads_q * head_size
     k_size = num_heads_k * head_size
     v_size = num_heads_v * head_size
@@ -2603,7 +2593,7 @@ def test_partial_rotary_pts_quant(
         (num_tokens, num_heads_v, head_size), dtype=dtype, device="cuda"
     )
 
-    q_ref, k_ref, v_ref = ref_qk_norm_partial_rotary(
+    q_ref, k_ref, v_ref = ref_partial_rotary_pts_quant(
         qkv,
         qw,
         kw,
