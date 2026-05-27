@@ -322,6 +322,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GPU_ARCHS: gfx1100
+      ENABLE_CK: 0
     steps:
       - name: Checkout aiter repo
         uses: actions/checkout@v4
