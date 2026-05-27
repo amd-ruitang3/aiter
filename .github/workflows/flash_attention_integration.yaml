@@ -320,6 +320,8 @@ jobs:
     name: TheRock Smoke Test
     needs: [prechecks]
     runs-on: ubuntu-latest
+    env:
+      GPU_ARCHS: gfx1100
     steps:
       - name: Checkout aiter repo
         uses: actions/checkout@v4
