@@ -7,19 +7,19 @@ num_tokens1=4096 img, Hq=Hk=24, head_size=128, bf16):
   1. fused_qk_norm_rope_2way + per_tensor_quant x2 (baseline)
   2. fused_qk_norm_rope_2way_fp8_perhead_quant   (fused, per-(batch,head))
 """
-import sys
 import os
+import sys
+
+import torch
+from torch import Tensor
 
 # Make sure we hit the in-tree aiter (where the new op lives), not /opt/aiter.
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-import torch
-from torch import Tensor
-
-import aiter
-from aiter.test_common import perftest
+import aiter  # noqa: E402
+from aiter.test_common import perftest  # noqa: E402
 
 
 @perftest()
