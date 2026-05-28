@@ -1737,6 +1737,7 @@ namespace py = pybind11;
           py::arg("v_scale"),                                   \
           py::arg("max_tokens_per_batch") = 0);                 \
     m.def("fused_qk_norm_rope_2way", &aiter::fused_qk_norm_rope_2way);                          \
+    m.def("fused_qk_norm_rope_1way", &aiter::fused_qk_norm_rope_1way);                          \
     m.def("fused_qk_norm_rope_2way_fp8_perhead_quant",                                          \
           &aiter::fused_qk_norm_rope_2way_fp8_perhead_quant,                                    \
           py::arg("q0"), py::arg("k0"), py::arg("q1"), py::arg("k1"),                           \
