@@ -67,10 +67,16 @@ def main():
     def rn(*shape):
         return torch.randn(*shape, dtype=dtype, device=dev)
 
-    q0 = rn(B, T0, Hq, D); k0 = rn(B, T0, Hk, D)
-    q1 = rn(B, T1, Hq, D); k1 = rn(B, T1, Hk, D)
-    w_q0 = rn(D); w_k0 = rn(D); w_q1 = rn(D); w_k1 = rn(D)
-    cos_sin0 = rn(T0, D); cos_sin1 = rn(T1, D)
+    q0 = rn(B, T0, Hq, D)
+    k0 = rn(B, T0, Hk, D)
+    q1 = rn(B, T1, Hq, D)
+    k1 = rn(B, T1, Hk, D)
+    w_q0 = rn(D)
+    w_k0 = rn(D)
+    w_q1 = rn(D)
+    w_k1 = rn(D)
+    cos_sin0 = rn(T0, D)
+    cos_sin1 = rn(T1, D)
 
     (_, _, qb_scale, kb_scale, qb_bf16, kb_bf16), t_base = run_baseline_split(
         q0, k0, q1, k1, w_q0, w_k0, w_q1, w_k1, cos_sin0, cos_sin1,
