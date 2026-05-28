@@ -7,6 +7,7 @@ num_tokens1=4096 img, Hq=Hk=24, head_size=128, bf16):
   1. fused_qk_norm_rope_2way + per_tensor_quant x2 (baseline)
   2. fused_qk_norm_rope_2way_fp8_perhead_quant   (fused, per-(batch,head))
 """
+
 import os
 import sys
 
