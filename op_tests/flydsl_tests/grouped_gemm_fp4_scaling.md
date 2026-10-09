@@ -50,6 +50,64 @@ Separate CLI invocations varied substantially: scale32 GEMM1 ranged from
 runs. The interleaved medians above compare modes within one prepared
 process; individual CLI timings can differ from them.
 
+## Why an earlier 512-token result appeared equal
+
+Two earlier comparisons need to be distinguished. The 12:39 UTC temporary
+comparison reported graph GEMM1/GEMM2 medians of 150.43/79.61 µs for scale32,
+147.42/78.05 µs for scale16, and 147.80/80.58 µs for NVFP4. That harness did
+not record or assert launch settings. Retained JIT artifacts from its
+preparation show **different wave tiles**: the scale32 input quantizer compiled
+at 12:39:26 uses `r4`, whereas the NVFP4 input quantizer compiled at 12:39:27
+uses `r2`. Here `r = tile_m / (m_warp * 16)`; it fixes the preshuffled
+activation layout consumed by GEMM1. The same-CSV comparison at 12:42 instead
+compiled both scale16 input quantizers with `r4`.
+
+The retained GEMM cache also includes scale16 E8M0 kernels with
+32 × 256 × 128 tiles for both stages, and non-unit-float NVFP4 kernels with
+32 × 256 × 128 for GEMM1 and 32 × 512 × 256 for GEMM2. Those artifacts have
+128/126 and 128/248 VGPRs, respectively, versus 360/358 for the original
+64 × 512 × 128 kernels. These are artifacts of the earlier experiments;
+the exact launcher snapshot and dispatch trace for the 12:39 comparison
+were not retained, so every launch setting cannot be reconstructed from
+cache presence alone. The quantizer artifacts created during preparation
+establish that the early comparison did not use identical wave tiles.
+
+At 512 balanced tokens, each expert has only 32 valid routes. A smaller M
+tile can avoid the padded half of an M64 tile and reduce accumulator pressure,
+offsetting scale16 costs. The 12:39 result therefore cannot establish
+scale16/scale32 parity under the user's fixed CSV configuration.
+
+The **first committed fixed-CSV result** (`db7bd5621`, collected at 12:42)
+was close under the CLI's eager PyTorch-profiler method: 252.14 versus
+254.34 µs summed GEMMs, or +0.87% for scale16. Its graph measurements were
+already 230.81 versus 240.90 µs, or **+4.37%**. The profiler averages filtered
+device events from eager Python launches; graph timing measures repeated
+device launches with HIP events. These produce different dispatch conditions.
+The difference is not simply Python launch time added to a device event,
+and the saved run has insufficient evidence to attribute its near-parity to
+one specific clock, cache, or profiler effect.
+
+A new comparison loads the kernel source from each commit and runs it on
+the **same prepared tensors per scale mode**, with launch overrides removed
+and the shared CSV settings asserted. All three versions produce bit-exact
+GEMM1 payload bytes, intermediate scale bytes, and GEMM2 outputs; unwritten
+padding is zeroed before comparison. Seven randomized interleaved graph
+rounds and five eager-profiler rounds give:
+
+| Kernel revision | Scale32 graph G1/G2 (µs) | Scale16 graph G1/G2 (µs) | Scale16 summed gap | NVFP4 graph G1/G2 (µs) |
+|---|---:|---:|---:|---:|
+| Original `db7bd5621` | 150.38 / 79.37 | 158.02 / 82.56 | +4.71% | 159.34 / 82.51 |
+| Read-count correction `9c7e589e9` | 150.25 / 78.82 | 155.59 / 83.07 | +4.19% | 158.57 / 82.20 |
+| Packed stores `bb5d1f80f` | 148.95 / 78.59 | 155.48 / 82.22 | +4.47% | 158.10 / 83.12 |
+
+In this same-input run, original/current scale16 profiler summed gaps are
++3.34%/+2.43%. Reverting the scheduling and packed-store changes does not
+recover fixed-tile parity. The current scale16 graph sum is 237.71 µs versus
+240.58 µs for the original; this comparison shows no scale16 regression from
+the retained changes. Raw samples, full revision IDs, historical results, and
+the relevant JIT metadata are in
+[grouped_gemm_fp4_version_results.json](grouped_gemm_fp4_version_results.json).
+
 ## Larger token counts
 
 The 2,048 and 16,384-token cases also use **64 × 512 × 128** for both

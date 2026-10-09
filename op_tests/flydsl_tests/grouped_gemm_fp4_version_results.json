@@ -1,0 +1,1531 @@
+{
+  "method": {
+    "date": "2026-10-09",
+    "shape": {
+      "experts": 96,
+      "tokens": 512,
+      "topk": 6,
+      "model_dim": 7168,
+      "inter_dim": 3072,
+      "activation": "silu",
+      "bias": false,
+      "balanced": true
+    },
+    "kernel_revisions": {
+      "original": "db7bd562183d0a82636296d42d2c274a324c9264",
+      "ds_corrected": "9c7e589e9fa942f73bfc95f13f4ba9f2671aeaf7",
+      "current": "bb5d1f80f14643986e94c1c6ffd4e1e09fa04646"
+    },
+    "preparation": "Current fused MoE launcher, identical tensors reused across kernel revisions within each scale mode. Launcher source is identical in all compared commits.",
+    "padding": "GEMM1 payload and scale outputs zeroed before correctness comparison.",
+    "correctness": "Bit-exact GEMM1 payload, intermediate scales, and GEMM2 output across all three revisions for each mode.",
+    "graph": "Seven randomized interleaved rounds, seed 42; each round uses median of five event samples, 16 graph launches per sample, three warmup replays.",
+    "profiler": "Five randomized interleaved rounds; run_perftest(num_warmup=5,num_iters=101,testGraph=False).",
+    "global_scales_nvfp4": {
+      "a1": 0.7,
+      "a2": 1.3,
+      "w1": 0.8,
+      "w2": 1.1
+    },
+    "override_handling": "Removed all AITER_TDM_* variables and AITER_FLYDSL_MXFP4_CLUSTER_N/AITER_FLYDSL_NUM_WAVES_PER_TENSOR_TDM. Asserted matching launch settings for all modes.",
+    "timed_work": "Two isolated GEMMs; GEMM1 includes fused SiLU and intermediate FP4 quantization. Input quantization, routing and gather/reduce excluded."
+  },
+  "same_input_version_comparison": {
+    "current_scale32": {
+      "version": "current",
+      "graph": [
+        [
+          150.05187690258026,
+          148.4970599412918,
+          148.9502489566803,
+          147.9562520980835,
+          151.35887265205383,
+          147.77599275112152,
+          149.9893069267273
+        ],
+        [
+          78.25706154108047,
+          78.41730862855911,
+          78.59499752521515,
+          79.36368882656097,
+          79.50393855571747,
+          79.12081480026245,
+          77.76375114917755
+        ]
+      ],
+      "prof": [
+        [
+          156.53619000000003,
+          154.15820202020208,
+          156.33137,
+          155.84714000000002,
+          157.6405200000001
+        ],
+        [
+          92.6558554216868,
+          93.58261627906981,
+          93.2985862068966,
+          93.13659340659335,
+          93.4582444444443
+        ]
+      ],
+      "launch_configs": [
+        {
+          "tile_m": 64,
+          "tile_n": 512,
+          "tile_k": 128,
+          "m_warp": 1,
+          "n_warp": 4,
+          "num_buffers": 2,
+          "cluster_n": -1,
+          "waves_per_tensor_tdm": -1,
+          "next_stage_prefetch": 0
+        },
+        {
+          "tile_m": 64,
+          "tile_n": 512,
+          "tile_k": 128,
+          "m_warp": 1,
+          "n_warp": 4,
+          "num_buffers": 2,
+          "cluster_n": -1,
+          "waves_per_tensor_tdm": -1,
+          "next_stage_prefetch": 0
+        }
+      ],
+      "graph_median_us": [
+        148.9502489566803,
+        78.59499752521515
+      ],
+      "profiler_median_us": [
+        156.33137,
+        93.2985862068966
+      ],
+      "revision": "bb5d1f80f14643986e94c1c6ffd4e1e09fa04646",
+      "tokens": 512,
+      "resolved_launch_configs": [
+        {
+          "tile_m": 64,
+          "tile_n": 512,
+          "tile_k": 128,
+          "m_warp": 1,
+          "n_warp": 4,
+          "num_buffers": 2,
+          "cluster_n": 1,
+          "waves_per_tensor_tdm": 2,
+          "next_stage_prefetch": 0
+        },
+        {
+          "tile_m": 64,
+          "tile_n": 512,
+          "tile_k": 128,
+          "m_warp": 1,
+          "n_warp": 4,
+          "num_buffers": 2,
+          "cluster_n": 1,
+          "waves_per_tensor_tdm": 2,
+          "next_stage_prefetch": 0
+        }
+      ],
+      "graph_summed_us": 227.54524648189545,
+      "graph_summed_gap_pct": 0.0,
+      "profiler_summed_us": 249.6299562068966,
+      "profiler_summed_gap_pct": 0.0
+    },
+    "original_scale32": {
+      "version": "original",
+      "graph": [
+        [
+          149.4259387254715,
+          152.17256546020508,
+          150.82800388336182,
+          150.37737786769867,
+          151.11593902111053,
+          150.3823697566986,
+          149.996817111969
+        ],
+        [
+          78.82537692785263,
+          80.25500178337097,
+          78.93549650907516,
+          79.48887348175049,
+          78.96806299686432,
+          79.36618477106094,
+          79.79431003332138
+        ]
+      ],
+      "prof": [
+        [
+          154.44678000000008,
+          155.89302999999992,
+          157.76765000000006,
+          156.41893,
+          155.08440000000002
+        ],
+        [
+          93.01760869565209,
+          93.09394047619055,
+          93.1155054945054,
+          93.2761868131868,
+          93.49056818181799
+        ]
+      ],
+      "launch_configs": [
+        {
+          "tile_m": 64,
+          "tile_n": 512,
+          "tile_k": 128,
+          "m_warp": 1,
+          "n_warp": 4,
+          "num_buffers": 2,
+          "cluster_n": -1,
+          "waves_per_tensor_tdm": -1,
+          "next_stage_prefetch": 0
+        },
+        {
+          "tile_m": 64,
+          "tile_n": 512,
+          "tile_k": 128,
+          "m_warp": 1,
+          "n_warp": 4,
+          "num_buffers": 2,
+          "cluster_n": -1,
+          "waves_per_tensor_tdm": -1,
+          "next_stage_prefetch": 0
+        }
+      ],
+      "graph_median_us": [
+        150.3823697566986,
+        79.36618477106094
+      ],
+      "profiler_median_us": [
+        155.89302999999992,
+        93.1155054945054
+      ],
+      "revision": "db7bd562183d0a82636296d42d2c274a324c9264",
+      "tokens": 512,
+      "resolved_launch_configs": [
+        {
+          "tile_m": 64,
+          "tile_n": 512,
+          "tile_k": 128,
+          "m_warp": 1,
+          "n_warp": 4,
+          "num_buffers": 2,
+          "cluster_n": 1,
+          "waves_per_tensor_tdm": 2,
+          "next_stage_prefetch": 0
+        },
+        {
+          "tile_m": 64,
+          "tile_n": 512,
+          "tile_k": 128,
+          "m_warp": 1,
+          "n_warp": 4,
+          "num_buffers": 2,
+          "cluster_n": 1,
+          "waves_per_tensor_tdm": 2,
+          "next_stage_prefetch": 0
+        }
+      ],
+      "graph_summed_us": 229.74855452775955,
+      "graph_summed_gap_pct": 0.0,
+      "profiler_summed_us": 249.00853549450534,
+      "profiler_summed_gap_pct": 0.0
+    },
+    "ds_corrected_scale32": {
+      "version": "ds_corrected",
+      "graph": [
+        [
+          151.91218256950378,
+          151.66431665420532,
+          148.7123817205429,
+          150.2496898174286,
+          150.39244294166565,
+          147.49805629253387,
+          149.02786910533905
+        ],
+        [
+          80.28506487607956,
+          78.81781458854675,
+          79.01312410831451,
+          79.31362837553024,
+          77.98156142234802,
+          76.12137496471405,
+          78.29206436872482
+        ]
+      ],
+      "prof": [
+        [
+          155.37086000000002,
+          155.51754000000005,
+          150.30654255319155,
+          156.50135,
+          154.7987100000001
+        ],
+        [
+          92.6278390804598,
+          92.94465060240968,
+          93.00256521739138,
+          92.90481914893621,
+          93.0992380952382
+        ]
+      ],
+      "launch_configs": [
+        {
+          "tile_m": 64,
+          "tile_n": 512,
+          "tile_k": 128,
+          "m_warp": 1,
+          "n_warp": 4,
+          "num_buffers": 2,
+          "cluster_n": -1,
+          "waves_per_tensor_tdm": -1,
+          "next_stage_prefetch": 0
+        },
+        {
+          "tile_m": 64,
+          "tile_n": 512,
+          "tile_k": 128,
+          "m_warp": 1,
+          "n_warp": 4,
+          "num_buffers": 2,
+          "cluster_n": -1,
+          "waves_per_tensor_tdm": -1,
+          "next_stage_prefetch": 0
+        }
+      ],
+      "graph_median_us": [
+        150.2496898174286,
+        78.81781458854675
+      ],
+      "profiler_median_us": [
+        155.37086000000002,
+        92.94465060240968
+      ],
+      "revision": "9c7e589e9fa942f73bfc95f13f4ba9f2671aeaf7",
+      "tokens": 512,
+      "resolved_launch_configs": [
+        {
+          "tile_m": 64,
+          "tile_n": 512,
+          "tile_k": 128,
+          "m_warp": 1,
+          "n_warp": 4,
+          "num_buffers": 2,
+          "cluster_n": 1,
+          "waves_per_tensor_tdm": 2,
+          "next_stage_prefetch": 0
+        },
+        {
+          "tile_m": 64,
+          "tile_n": 512,
+          "tile_k": 128,
+          "m_warp": 1,
+          "n_warp": 4,
+          "num_buffers": 2,
+          "cluster_n": 1,
+          "waves_per_tensor_tdm": 2,
+          "next_stage_prefetch": 0
+        }
+      ],
+      "graph_summed_us": 229.06750440597534,
+      "graph_summed_gap_pct": 0.0,
+      "profiler_summed_us": 248.3155106024097,
+      "profiler_summed_gap_pct": 0.0
+    },
+    "current_scale16": {
+      "version": "current",
+      "graph": [
+        [
+          157.27268159389496,
+          154.99675273895264,
+          157.5881838798523,
+          155.48256039619446,
+          154.39337491989136,
+          155.37981688976288,
+          155.8530628681183
+        ],
+        [
+          82.22293853759766,
+          84.58399772644043,
+          84.84937250614166,
+          82.36318826675415,
+          81.73474669456482,
+          81.52443915605545,
+          81.29656314849854
+        ]
+      ],
+      "prof": [
+        [
+          158.82886734693872,
+          158.88922340425515,
+          160.41489000000004,
+          159.12743877551017,
+          161.22027000000008
+        ],
+        [
+          96.6985568181818,
+          96.33391358024689,
+          96.77443181818184,
+          96.3766091954023,
+          96.56978409090907
+        ]
+      ],
+      "launch_configs": [
+        {
+          "tile_m": 64,
+          "tile_n": 512,
+          "tile_k": 128,
+          "m_warp": 1,
+          "n_warp": 4,
+          "num_buffers": 2,
+          "cluster_n": -1,
+          "waves_per_tensor_tdm": -1,
+          "next_stage_prefetch": 0
+        },
+        {
+          "tile_m": 64,
+          "tile_n": 512,
+          "tile_k": 128,
+          "m_warp": 1,
+          "n_warp": 4,
+          "num_buffers": 2,
+          "cluster_n": -1,
+          "waves_per_tensor_tdm": -1,
+          "next_stage_prefetch": 0
+        }
+      ],
+      "graph_median_us": [
+        155.48256039619446,
+        82.22293853759766
+      ],
+      "profiler_median_us": [
+        159.12743877551017,
+        96.56978409090907
+      ],
+      "revision": "bb5d1f80f14643986e94c1c6ffd4e1e09fa04646",
+      "tokens": 512,
+      "resolved_launch_configs": [
+        {
+          "tile_m": 64,
+          "tile_n": 512,
+          "tile_k": 128,
+          "m_warp": 1,
+          "n_warp": 4,
+          "num_buffers": 2,
+          "cluster_n": 1,
+          "waves_per_tensor_tdm": 2,
+          "next_stage_prefetch": 0
+        },
+        {
+          "tile_m": 64,
+          "tile_n": 512,
+          "tile_k": 128,
+          "m_warp": 1,
+          "n_warp": 4,
+          "num_buffers": 2,
+          "cluster_n": 1,
+          "waves_per_tensor_tdm": 2,
+          "next_stage_prefetch": 0
+        }
+      ],
+      "graph_summed_us": 237.70549893379211,
+      "graph_summed_gap_pct": 4.465156978221052,
+      "profiler_summed_us": 255.69722286641922,
+      "profiler_summed_gap_pct": 2.4305042358353734
+    },
+    "original_scale16": {
+      "version": "original",
+      "graph": [
+        [
+          157.8260064125061,
+          156.75944089889526,
+          157.08737075328827,
+          158.02131593227386,
+          158.67730975151062,
+          158.10394287109375,
+          158.14650058746338
+        ],
+        [
+          83.38968455791473,
+          83.5549384355545,
+          82.02268928289413,
+          82.4333131313324,
+          82.5609341263771,
+          81.3366249203682,
+          83.50987732410431
+        ]
+      ],
+      "prof": [
+        [
+          161.24060416666666,
+          161.26328571428564,
+          160.18732989690733,
+          161.55956122448993,
+          158.67513793103444
+        ],
+        [
+          96.06028888888886,
+          96.74442222222225,
+          96.60830952380974,
+          96.09522727272724,
+          95.77416867469871
+        ]
+      ],
+      "launch_configs": [
+        {
+          "tile_m": 64,
+          "tile_n": 512,
+          "tile_k": 128,
+          "m_warp": 1,
+          "n_warp": 4,
+          "num_buffers": 2,
+          "cluster_n": -1,
+          "waves_per_tensor_tdm": -1,
+          "next_stage_prefetch": 0
+        },
+        {
+          "tile_m": 64,
+          "tile_n": 512,
+          "tile_k": 128,
+          "m_warp": 1,
+          "n_warp": 4,
+          "num_buffers": 2,
+          "cluster_n": -1,
+          "waves_per_tensor_tdm": -1,
+          "next_stage_prefetch": 0
+        }
+      ],
+      "graph_median_us": [
+        158.02131593227386,
+        82.5609341263771
+      ],
+      "profiler_median_us": [
+        161.24060416666666,
+        96.09522727272724
+      ],
+      "revision": "db7bd562183d0a82636296d42d2c274a324c9264",
+      "tokens": 512,
+      "resolved_launch_configs": [
+        {
+          "tile_m": 64,
+          "tile_n": 512,
+          "tile_k": 128,
+          "m_warp": 1,
+          "n_warp": 4,
+          "num_buffers": 2,
+          "cluster_n": 1,
+          "waves_per_tensor_tdm": 2,
+          "next_stage_prefetch": 0
+        },
+        {
+          "tile_m": 64,
+          "tile_n": 512,
+          "tile_k": 128,
+          "m_warp": 1,
+          "n_warp": 4,
+          "num_buffers": 2,
+          "cluster_n": 1,
+          "waves_per_tensor_tdm": 2,
+          "next_stage_prefetch": 0
+        }
+      ],
+      "graph_summed_us": 240.58225005865097,
+      "graph_summed_gap_pct": 4.715457537114753,
+      "profiler_summed_us": 257.3358314393939,
+      "profiler_summed_gap_pct": 3.344180924702611
+    },
+    "ds_corrected_scale16": {
+      "version": "ds_corrected",
+      "graph": [
+        [
+          157.51555562019348,
+          155.30474483966827,
+          155.14950454235077,
+          156.91718459129333,
+          157.49050676822662,
+          155.592679977417,
+          155.4950624704361
+        ],
+        [
+          83.074189722538,
+          80.81337809562683,
+          81.84737712144852,
+          83.61999690532684,
+          84.0156227350235,
+          80.7281881570816,
+          84.09074693918228
+        ]
+      ],
+      "prof": [
+        [
+          157.0831075268817,
+          157.58184444444467,
+          161.28908000000007,
+          157.8539090909091,
+          157.5707052631579
+        ],
+        [
+          95.78383516483508,
+          95.94911702127655,
+          95.90059999999988,
+          96.55162921348318,
+          95.9209222222222
+        ]
+      ],
+      "launch_configs": [
+        {
+          "tile_m": 64,
+          "tile_n": 512,
+          "tile_k": 128,
+          "m_warp": 1,
+          "n_warp": 4,
+          "num_buffers": 2,
+          "cluster_n": -1,
+          "waves_per_tensor_tdm": -1,
+          "next_stage_prefetch": 0
+        },
+        {
+          "tile_m": 64,
+          "tile_n": 512,
+          "tile_k": 128,
+          "m_warp": 1,
+          "n_warp": 4,
+          "num_buffers": 2,
+          "cluster_n": -1,
+          "waves_per_tensor_tdm": -1,
+          "next_stage_prefetch": 0
+        }
+      ],
+      "graph_median_us": [
+        155.592679977417,
+        83.074189722538
+      ],
+      "profiler_median_us": [
+        157.58184444444467,
+        95.9209222222222
+      ],
+      "revision": "9c7e589e9fa942f73bfc95f13f4ba9f2671aeaf7",
+      "tokens": 512,
+      "resolved_launch_configs": [
+        {
+          "tile_m": 64,
+          "tile_n": 512,
+          "tile_k": 128,
+          "m_warp": 1,
+          "n_warp": 4,
+          "num_buffers": 2,
+          "cluster_n": 1,
+          "waves_per_tensor_tdm": 2,
+          "next_stage_prefetch": 0
+        },
+        {
+          "tile_m": 64,
+          "tile_n": 512,
+          "tile_k": 128,
+          "m_warp": 1,
+          "n_warp": 4,
+          "num_buffers": 2,
+          "cluster_n": 1,
+          "waves_per_tensor_tdm": 2,
+          "next_stage_prefetch": 0
+        }
+      ],
+      "graph_summed_us": 238.666869699955,
+      "graph_summed_gap_pct": 4.190627264601754,
+      "profiler_summed_us": 253.50276666666687,
+      "profiler_summed_gap_pct": 2.088977869998132
+    },
+    "current_nvfp4": {
+      "version": "current",
+      "graph": [
+        [
+          158.09893608093262,
+          157.53556787967682,
+          158.41686725616455,
+          158.29168260097504,
+          157.90869295597076,
+          158.26162695884705,
+          157.57311880588531
+        ],
+        [
+          83.66012573242188,
+          83.11674743890762,
+          84.14831012487411,
+          81.88243955373764,
+          84.01812613010406,
+          81.21643960475922,
+          82.38818496465683
+        ]
+      ],
+      "prof": [
+        [
+          163.34834999999998,
+          160.4837272727273,
+          159.36270967741925,
+          159.71167368421058,
+          158.83621590909078
+        ],
+        [
+          96.37944565217379,
+          96.80856179775286,
+          96.88748863636373,
+          96.7701111111111,
+          97.15462068965519
+        ]
+      ],
+      "launch_configs": [
+        {
+          "tile_m": 64,
+          "tile_n": 512,
+          "tile_k": 128,
+          "m_warp": 1,
+          "n_warp": 4,
+          "num_buffers": 2,
+          "cluster_n": -1,
+          "waves_per_tensor_tdm": -1,
+          "next_stage_prefetch": 0
+        },
+        {
+          "tile_m": 64,
+          "tile_n": 512,
+          "tile_k": 128,
+          "m_warp": 1,
+          "n_warp": 4,
+          "num_buffers": 2,
+          "cluster_n": -1,
+          "waves_per_tensor_tdm": -1,
+          "next_stage_prefetch": 0
+        }
+      ],
+      "graph_median_us": [
+        158.09893608093262,
+        83.11674743890762
+      ],
+      "profiler_median_us": [
+        159.71167368421058,
+        96.80856179775286
+      ],
+      "revision": "bb5d1f80f14643986e94c1c6ffd4e1e09fa04646",
+      "tokens": 512,
+      "resolved_launch_configs": [
+        {
+          "tile_m": 64,
+          "tile_n": 512,
+          "tile_k": 128,
+          "m_warp": 1,
+          "n_warp": 4,
+          "num_buffers": 2,
+          "cluster_n": 1,
+          "waves_per_tensor_tdm": 2,
+          "next_stage_prefetch": 0
+        },
+        {
+          "tile_m": 64,
+          "tile_n": 512,
+          "tile_k": 128,
+          "m_warp": 1,
+          "n_warp": 4,
+          "num_buffers": 2,
+          "cluster_n": 1,
+          "waves_per_tensor_tdm": 2,
+          "next_stage_prefetch": 0
+        }
+      ],
+      "graph_summed_us": 241.21568351984024,
+      "graph_summed_gap_pct": 6.007788450563156,
+      "profiler_summed_us": 256.5202354819634,
+      "profiler_summed_gap_pct": 2.7601972855197277
+    },
+    "original_nvfp4": {
+      "version": "original",
+      "graph": [
+        [
+          158.49949419498444,
+          159.32075679302216,
+          160.9656810760498,
+          160.5801284313202,
+          158.83250534534454,
+          159.3407541513443,
+          160.68525612354279
+        ],
+        [
+          82.19793438911438,
+          82.79880881309509,
+          82.46581256389618,
+          82.56843686103821,
+          82.51337707042694,
+          81.96005970239639,
+          82.51587301492691
+        ]
+      ],
+      "prof": [
+        [
+          160.06213953488376,
+          164.96167999999997,
+          162.11718749999997,
+          165.14905999999996,
+          160.86872527472528
+        ],
+        [
+          96.80792391304341,
+          97.10208791208773,
+          97.38694505494502,
+          96.88907608695658,
+          97.31117894736835
+        ]
+      ],
+      "launch_configs": [
+        {
+          "tile_m": 64,
+          "tile_n": 512,
+          "tile_k": 128,
+          "m_warp": 1,
+          "n_warp": 4,
+          "num_buffers": 2,
+          "cluster_n": -1,
+          "waves_per_tensor_tdm": -1,
+          "next_stage_prefetch": 0
+        },
+        {
+          "tile_m": 64,
+          "tile_n": 512,
+          "tile_k": 128,
+          "m_warp": 1,
+          "n_warp": 4,
+          "num_buffers": 2,
+          "cluster_n": -1,
+          "waves_per_tensor_tdm": -1,
+          "next_stage_prefetch": 0
+        }
+      ],
+      "graph_median_us": [
+        159.3407541513443,
+        82.51337707042694
+      ],
+      "profiler_median_us": [
+        162.11718749999997,
+        97.10208791208773
+      ],
+      "revision": "db7bd562183d0a82636296d42d2c274a324c9264",
+      "tokens": 512,
+      "resolved_launch_configs": [
+        {
+          "tile_m": 64,
+          "tile_n": 512,
+          "tile_k": 128,
+          "m_warp": 1,
+          "n_warp": 4,
+          "num_buffers": 2,
+          "cluster_n": 1,
+          "waves_per_tensor_tdm": 2,
+          "next_stage_prefetch": 0
+        },
+        {
+          "tile_m": 64,
+          "tile_n": 512,
+          "tile_k": 128,
+          "m_warp": 1,
+          "n_warp": 4,
+          "num_buffers": 2,
+          "cluster_n": 1,
+          "waves_per_tensor_tdm": 2,
+          "next_stage_prefetch": 0
+        }
+      ],
+      "graph_summed_us": 241.85413122177124,
+      "graph_summed_gap_pct": 5.2690545622340546,
+      "profiler_summed_us": 259.2192754120877,
+      "profiler_summed_gap_pct": 4.100558198659687
+    },
+    "ds_corrected_nvfp4": {
+      "version": "ds_corrected",
+      "graph": [
+        [
+          157.92612731456757,
+          158.9026302099228,
+          158.18406641483307,
+          159.05781090259552,
+          158.57212245464325,
+          158.90511870384216,
+          157.66574442386627
+        ],
+        [
+          83.46987515687943,
+          83.83787423372269,
+          82.60349929332733,
+          82.19537138938904,
+          81.75724744796753,
+          81.70468360185623,
+          81.86743408441544
+        ]
+      ],
+      "prof": [
+        [
+          160.74012903225815,
+          161.0802282608695,
+          159.23359090909082,
+          160.10650000000012,
+          158.16928735632186
+        ],
+        [
+          96.41252808988759,
+          97.10136666666662,
+          97.21199999999999,
+          96.92089010989022,
+          96.97046511627902
+        ]
+      ],
+      "launch_configs": [
+        {
+          "tile_m": 64,
+          "tile_n": 512,
+          "tile_k": 128,
+          "m_warp": 1,
+          "n_warp": 4,
+          "num_buffers": 2,
+          "cluster_n": -1,
+          "waves_per_tensor_tdm": -1,
+          "next_stage_prefetch": 0
+        },
+        {
+          "tile_m": 64,
+          "tile_n": 512,
+          "tile_k": 128,
+          "m_warp": 1,
+          "n_warp": 4,
+          "num_buffers": 2,
+          "cluster_n": -1,
+          "waves_per_tensor_tdm": -1,
+          "next_stage_prefetch": 0
+        }
+      ],
+      "graph_median_us": [
+        158.57212245464325,
+        82.19537138938904
+      ],
+      "profiler_median_us": [
+        160.10650000000012,
+        96.97046511627902
+      ],
+      "revision": "9c7e589e9fa942f73bfc95f13f4ba9f2671aeaf7",
+      "tokens": 512,
+      "resolved_launch_configs": [
+        {
+          "tile_m": 64,
+          "tile_n": 512,
+          "tile_k": 128,
+          "m_warp": 1,
+          "n_warp": 4,
+          "num_buffers": 2,
+          "cluster_n": 1,
+          "waves_per_tensor_tdm": 2,
+          "next_stage_prefetch": 0
+        },
+        {
+          "tile_m": 64,
+          "tile_n": 512,
+          "tile_k": 128,
+          "m_warp": 1,
+          "n_warp": 4,
+          "num_buffers": 2,
+          "cluster_n": 1,
+          "waves_per_tensor_tdm": 2,
+          "next_stage_prefetch": 0
+        }
+      ],
+      "graph_summed_us": 240.7674938440323,
+      "graph_summed_gap_pct": 5.107660062215147,
+      "profiler_summed_us": 257.07696511627915,
+      "profiler_summed_gap_pct": 3.5283557167308244
+    }
+  },
+  "historical_1239_uncontrolled": {
+    "source": "/tmp/aiter-fp4-final-results.json",
+    "harness": "/tmp/aiter-final-comparison.py",
+    "launch_settings_recorded": false,
+    "results": {
+      "mxfp4_32": {
+        "logits_diff": 3.403618562975784e-06,
+        "profiler_median_us": [
+          157.32082000000008,
+          92.65515294117651
+        ],
+        "graph_median_us": [
+          150.4286825656891,
+          79.6140655875206
+        ],
+        "profiler_samples_us": [
+          [
+            158.5335000000001,
+            157.32082000000008,
+            158.37496000000007,
+            157.20424000000008,
+            155.80893999999998
+          ],
+          [
+            92.27822222222237,
+            92.65515294117651,
+            92.57724731182775,
+            92.91829761904762,
+            92.99902380952378
+          ]
+        ],
+        "graph_samples_us": [
+          [
+            149.64494109153748,
+            150.4286825656891,
+            151.63424611091614,
+            151.0959416627884,
+            150.12693405151367
+          ],
+          [
+            79.45375144481659,
+            79.96456325054169,
+            79.6140655875206,
+            77.11280882358551,
+            81.07119053602219
+          ]
+        ]
+      },
+      "mxfp4_16": {
+        "logits_diff": 4.536594560460897e-12,
+        "profiler_median_us": [
+          150.56464999999992,
+          90.58355319148927
+        ],
+        "graph_median_us": [
+          147.4228799343109,
+          78.05424928665161
+        ],
+        "profiler_samples_us": [
+          [
+            150.56464999999992,
+            149.26325000000006,
+            144.63275,
+            154.25417,
+            151.10916999999998
+          ],
+          [
+            88.09079000000008,
+            90.58355319148927,
+            90.33079518072289,
+            91.07755294117639,
+            90.94795294117651
+          ]
+        ],
+        "graph_samples_us": [
+          [
+            147.4228799343109,
+            149.18050169944763,
+            150.88556706905365,
+            146.77943289279938,
+            146.67680859565735
+          ],
+          [
+            77.76881009340286,
+            79.36868816614151,
+            78.05424928665161,
+            77.79131084680557,
+            80.30006289482117
+          ]
+        ]
+      },
+      "nvfp4": {
+        "logits_diff": 1.7931270513543052e-05,
+        "profiler_median_us": [
+          152.8586199999999,
+          93.74968181818177
+        ],
+        "graph_median_us": [
+          147.8009968996048,
+          80.58299869298935
+        ],
+        "profiler_samples_us": [
+          [
+            154.69770000000008,
+            152.8586199999999,
+            155.68598947368432,
+            150.4331699999999,
+            146.86477000000002
+          ],
+          [
+            93.66094047619042,
+            93.74968181818177,
+            93.67435064935066,
+            93.89232530120486,
+            94.2303409090909
+          ]
+        ],
+        "graph_samples_us": [
+          [
+            146.93962037563324,
+            147.7183699607849,
+            147.8009968996048,
+            150.98825097084045,
+            148.0088084936142
+          ],
+          [
+            79.46880906820297,
+            80.58299869298935,
+            80.83081245422363,
+            80.45274764299393,
+            80.91093599796295
+          ]
+        ]
+      }
+    }
+  },
+  "historical_1242_first_committed_fixed_csv": {
+    "revision": "db7bd562183d0a82636296d42d2c274a324c9264",
+    "source": "git show db7bd5621:op_tests/flydsl_tests/grouped_gemm_fp4_scaling_results.json",
+    "results": {
+      "mxfp4_32": {
+        "launch_configs": [
+          {
+            "tile_m": 64,
+            "tile_n": 512,
+            "tile_k": 128,
+            "m_warp": 1,
+            "n_warp": 4,
+            "num_buffers": 2,
+            "cluster_n": -1,
+            "waves_per_tensor_tdm": -1,
+            "next_stage_prefetch": 0
+          },
+          {
+            "tile_m": 64,
+            "tile_n": 512,
+            "tile_k": 128,
+            "m_warp": 1,
+            "n_warp": 4,
+            "num_buffers": 2,
+            "cluster_n": -1,
+            "waves_per_tensor_tdm": -1,
+            "next_stage_prefetch": 0
+          }
+        ],
+        "logits_diff": 3.403618562975784e-06,
+        "profiler_median_us": [
+          158.8581400000001,
+          93.27787640449444
+        ],
+        "graph_median_us": [
+          151.5716314315796,
+          79.23349738121033
+        ],
+        "profiler_samples_us": [
+          [
+            155.97032000000004,
+            156.85689999999994,
+            158.8581400000001,
+            159.7325899999999,
+            159.42956999999996
+          ],
+          [
+            92.17339534883715,
+            91.73531818181823,
+            93.27787640449444,
+            93.37189473684205,
+            93.42718604651168
+          ]
+        ],
+        "graph_samples_us": [
+          [
+            151.5716314315796,
+            151.33625268936157,
+            152.1274298429489,
+            151.66425704956055,
+            150.5250632762909
+          ],
+          [
+            80.46281337738037,
+            78.46987247467041,
+            79.1032463312149,
+            79.88693565130234,
+            79.23349738121033
+          ]
+        ]
+      },
+      "mxfp4_16": {
+        "launch_configs": [
+          {
+            "tile_m": 64,
+            "tile_n": 512,
+            "tile_k": 128,
+            "m_warp": 1,
+            "n_warp": 4,
+            "num_buffers": 2,
+            "cluster_n": -1,
+            "waves_per_tensor_tdm": -1,
+            "next_stage_prefetch": 0
+          },
+          {
+            "tile_m": 64,
+            "tile_n": 512,
+            "tile_k": 128,
+            "m_warp": 1,
+            "n_warp": 4,
+            "num_buffers": 2,
+            "cluster_n": -1,
+            "waves_per_tensor_tdm": -1,
+            "next_stage_prefetch": 0
+          }
+        ],
+        "logits_diff": 4.536594560460897e-12,
+        "profiler_median_us": [
+          157.77259770114938,
+          96.56582558139539
+        ],
+        "graph_median_us": [
+          158.75981748104095,
+          82.14031159877777
+        ],
+        "profiler_samples_us": [
+          [
+            161.30272000000008,
+            157.2290888888889,
+            160.03143749999992,
+            157.40732222222215,
+            157.77259770114938
+          ],
+          [
+            96.5875697674418,
+            96.34331325301206,
+            96.96632926829274,
+            96.56582558139539,
+            96.24542528735648
+          ]
+        ],
+        "graph_samples_us": [
+          [
+            158.75981748104095,
+            158.8750034570694,
+            159.08531844615936,
+            157.20750391483307,
+            156.2986820936203
+          ],
+          [
+            82.03018456697464,
+            82.85131305456161,
+            82.12531358003616,
+            84.47375148534775,
+            82.14031159877777
+          ]
+        ]
+      },
+      "nvfp4": {
+        "launch_configs": [
+          {
+            "tile_m": 64,
+            "tile_n": 512,
+            "tile_k": 128,
+            "m_warp": 1,
+            "n_warp": 4,
+            "num_buffers": 2,
+            "cluster_n": -1,
+            "waves_per_tensor_tdm": -1,
+            "next_stage_prefetch": 0
+          },
+          {
+            "tile_m": 64,
+            "tile_n": 512,
+            "tile_k": 128,
+            "m_warp": 1,
+            "n_warp": 4,
+            "num_buffers": 2,
+            "cluster_n": -1,
+            "waves_per_tensor_tdm": -1,
+            "next_stage_prefetch": 0
+          }
+        ],
+        "logits_diff": 1.7931270513543052e-05,
+        "profiler_median_us": [
+          159.439875,
+          96.71531182795698
+        ],
+        "graph_median_us": [
+          159.14294123649597,
+          84.24593508243561
+        ],
+        "profiler_samples_us": [
+          [
+            158.65498901098906,
+            159.33331249999998,
+            160.33333684210538,
+            163.55298,
+            159.439875
+          ],
+          [
+            97.12247727272725,
+            96.69027173913041,
+            96.52620430107518,
+            97.44164285714285,
+            96.71531182795698
+          ]
+        ],
+        "graph_samples_us": [
+          [
+            157.96369314193726,
+            159.14294123649597,
+            160.50000488758087,
+            159.35075283050537,
+            159.0002477169037
+          ],
+          [
+            84.04318988323212,
+            84.7216248512268,
+            85.09974926710129,
+            83.74268561601639,
+            84.24593508243561
+          ]
+        ]
+      }
+    }
+  },
+  "historical_cache_evidence": {
+    "limitations": "Artifacts created during the 12:39 preparation show r4 for scale32 and r2 for NVFP4; r = tile_m/(m_warp*16). This establishes differing wave tiles. The exact historical launcher snapshot and a dispatch trace were not retained, so cache presence alone cannot assign every GEMM setting to every timed launch.",
+    "gemm_artifacts": [
+      {
+        "time": "2026-10-09T12:31:44+00:00",
+        "kernel": "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s32f00g0",
+        "vgpr": 360,
+        "lds": 80896,
+        "cache_file": "/root/.flydsl/cache/launch_gemm_a8w4_tdm_1fb4919d6547105635fb183fdcfe3d01/eda55e63c9ddd4d7.pkl",
+        "manager": "launch_gemm_a8w4_tdm_1fb4919d6547105635fb183fdcfe3d01",
+        "ir_sha256": "207c8e3274cf324c8fdc7281b963325d068473ceffeb7bd4e2635da294750da7"
+      },
+      {
+        "time": "2026-10-09T12:42:15+00:00",
+        "kernel": "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K3072_e96_s16f00g0",
+        "vgpr": 358,
+        "lds": 84992,
+        "cache_file": "/root/.flydsl/cache/launch_gemm_a8w4_tdm_1fb4919d6547105635fb183fdcfe3d01/3c89884d378d0931.pkl",
+        "manager": "launch_gemm_a8w4_tdm_1fb4919d6547105635fb183fdcfe3d01",
+        "ir_sha256": "6091547e5030d85220fc75f5345285574a0494cbab7061744e3f0127bd4dd30d"
+      },
+      {
+        "time": "2026-10-09T12:42:14+00:00",
+        "kernel": "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s16f00g0",
+        "vgpr": 360,
+        "lds": 84992,
+        "cache_file": "/root/.flydsl/cache/launch_gemm_a8w4_tdm_1fb4919d6547105635fb183fdcfe3d01/18148ca9979489b5.pkl",
+        "manager": "launch_gemm_a8w4_tdm_1fb4919d6547105635fb183fdcfe3d01",
+        "ir_sha256": "759ffe2405d4b072261fae5e557dc0cef8767e571b3f165ba19fa4df12ed1cfb"
+      },
+      {
+        "time": "2026-10-09T12:39:10+00:00",
+        "kernel": "a8w4_tdm_fp4_t32x256x128_w1x4_b2_K7168_e96_act1_q1r2_s16f22g0",
+        "vgpr": 128,
+        "lds": 43008,
+        "cache_file": "/root/.flydsl/cache/launch_gemm_a8w4_tdm_1fb4919d6547105635fb183fdcfe3d01/040247b0c638d161.pkl",
+        "manager": "launch_gemm_a8w4_tdm_1fb4919d6547105635fb183fdcfe3d01",
+        "ir_sha256": "138f164e28b365d27627736d328fe77d021b628efc1a8a513b3682ea3697af17"
+      },
+      {
+        "time": "2026-10-09T12:32:23+00:00",
+        "kernel": "a8w4_tdm_fp4_t32x256x128_w1x4_b2_K7168_e96_act1_q1r2_s16f22g1",
+        "vgpr": 128,
+        "lds": 43008,
+        "cache_file": "/root/.flydsl/cache/launch_gemm_a8w4_tdm_1fb4919d6547105635fb183fdcfe3d01/c2121c9c1dcb9acb.pkl",
+        "manager": "launch_gemm_a8w4_tdm_1fb4919d6547105635fb183fdcfe3d01",
+        "ir_sha256": "a74ee4d13e0104d8e25f8a6d639964900b659531a28de9057da4dd07b40a78a0"
+      },
+      {
+        "time": "2026-10-09T12:31:46+00:00",
+        "kernel": "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K3072_e96_s32f00g0",
+        "vgpr": 358,
+        "lds": 80896,
+        "cache_file": "/root/.flydsl/cache/launch_gemm_a8w4_tdm_1fb4919d6547105635fb183fdcfe3d01/9aa6e8c058e42696.pkl",
+        "manager": "launch_gemm_a8w4_tdm_1fb4919d6547105635fb183fdcfe3d01",
+        "ir_sha256": "1c3f2e8e0acbf00da7a7eae50d0efb6db54cafc1edcc90ca9e49c8658d7f78e3"
+      },
+      {
+        "time": "2026-10-09T12:42:19+00:00",
+        "kernel": "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s16f22g1",
+        "vgpr": 360,
+        "lds": 84992,
+        "cache_file": "/root/.flydsl/cache/launch_gemm_a8w4_tdm_1fb4919d6547105635fb183fdcfe3d01/5b9c1aa0ad5a78cd.pkl",
+        "manager": "launch_gemm_a8w4_tdm_1fb4919d6547105635fb183fdcfe3d01",
+        "ir_sha256": "0149485cd8f109dd51ef2dacc57bddfe38b5852ce8c83b5c5d2112c128479ea7"
+      },
+      {
+        "time": "2026-10-09T12:32:25+00:00",
+        "kernel": "a8w4_tdm_fp4_t32x512x256_w1x4_b2_K3072_e96_s16f22g1",
+        "vgpr": 248,
+        "lds": 157696,
+        "cache_file": "/root/.flydsl/cache/launch_gemm_a8w4_tdm_1fb4919d6547105635fb183fdcfe3d01/c4f4ecbe677ccd11.pkl",
+        "manager": "launch_gemm_a8w4_tdm_1fb4919d6547105635fb183fdcfe3d01",
+        "ir_sha256": "24555c3b7c41d385cc13421f328984cf720a3a5d81109161efe5986329d3c287"
+      },
+      {
+        "time": "2026-10-09T12:30:12+00:00",
+        "kernel": "a8w4_tdm_fp4_t32x256x128_w1x4_b2_K7168_e96_act1_q1r2_s16f00g0",
+        "vgpr": 128,
+        "lds": 43008,
+        "cache_file": "/root/.flydsl/cache/launch_gemm_a8w4_tdm_1fb4919d6547105635fb183fdcfe3d01/8fb9e43e5f6d6fa6.pkl",
+        "manager": "launch_gemm_a8w4_tdm_1fb4919d6547105635fb183fdcfe3d01",
+        "ir_sha256": "2437c8efe6a99974d3d29973b6633bad9f30451d6db5a254bc18c30f6090cc1e"
+      },
+      {
+        "time": "2026-10-09T12:42:20+00:00",
+        "kernel": "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K3072_e96_s16f22g1",
+        "vgpr": 358,
+        "lds": 84992,
+        "cache_file": "/root/.flydsl/cache/launch_gemm_a8w4_tdm_1fb4919d6547105635fb183fdcfe3d01/d5562fbf3e318d1b.pkl",
+        "manager": "launch_gemm_a8w4_tdm_1fb4919d6547105635fb183fdcfe3d01",
+        "ir_sha256": "24a88b873f7ccbeb53e6bf07fdc31b9c6d4ee09de32ed523a9ca7b6efb0c57cc"
+      },
+      {
+        "time": "2026-10-09T12:39:12+00:00",
+        "kernel": "a8w4_tdm_fp4_t32x512x256_w1x4_b2_K3072_e96_s16f22g0",
+        "vgpr": 248,
+        "lds": 157696,
+        "cache_file": "/root/.flydsl/cache/launch_gemm_a8w4_tdm_1fb4919d6547105635fb183fdcfe3d01/04af0b58de6bd83f.pkl",
+        "manager": "launch_gemm_a8w4_tdm_1fb4919d6547105635fb183fdcfe3d01",
+        "ir_sha256": "ac54a3c3a61914ac12428392ba8665212a16639492a47c731ef4a2112a8fb5b6"
+      },
+      {
+        "time": "2026-10-09T12:30:12+00:00",
+        "kernel": "a8w4_tdm_fp4_t32x256x128_w1x4_b2_K3072_e96_s16f00g0",
+        "vgpr": 126,
+        "lds": 43008,
+        "cache_file": "/root/.flydsl/cache/launch_gemm_a8w4_tdm_1fb4919d6547105635fb183fdcfe3d01/506315d370dd5835.pkl",
+        "manager": "launch_gemm_a8w4_tdm_1fb4919d6547105635fb183fdcfe3d01",
+        "ir_sha256": "ad81941b47d797ca9d8d9b966f04a3fe53ee5e3d6c4534d513edd491ff29c8a3"
+      },
+      {
+        "time": "2026-10-09T12:24:12+00:00",
+        "kernel": "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s32f00g0",
+        "vgpr": 360,
+        "lds": 80896,
+        "cache_file": "/root/.flydsl/cache/launch_gemm_a8w4_tdm_cd2e8679810626e64ca327f9ae0acd7a/eda55e63c9ddd4d7.pkl",
+        "manager": "launch_gemm_a8w4_tdm_cd2e8679810626e64ca327f9ae0acd7a",
+        "ir_sha256": "8e3906bc5b8cb10aa716965e0631c7b6bed301f986a799db386788fcb33f5cb3"
+      },
+      {
+        "time": "2026-10-09T12:21:20+00:00",
+        "kernel": "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K3072_e96_s16f00g0",
+        "vgpr": 358,
+        "lds": 84992,
+        "cache_file": "/root/.flydsl/cache/launch_gemm_a8w4_tdm_cd2e8679810626e64ca327f9ae0acd7a/3c89884d378d0931.pkl",
+        "manager": "launch_gemm_a8w4_tdm_cd2e8679810626e64ca327f9ae0acd7a",
+        "ir_sha256": "eebd67d6f5df254e5f8a254af1cc0d3f34002e2e6a8bd1589bc411c0e0b7d024"
+      },
+      {
+        "time": "2026-10-09T12:21:18+00:00",
+        "kernel": "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s16f00g0",
+        "vgpr": 360,
+        "lds": 84992,
+        "cache_file": "/root/.flydsl/cache/launch_gemm_a8w4_tdm_cd2e8679810626e64ca327f9ae0acd7a/18148ca9979489b5.pkl",
+        "manager": "launch_gemm_a8w4_tdm_cd2e8679810626e64ca327f9ae0acd7a",
+        "ir_sha256": "169dfd4e591d146c05ab4173882dd3ae1108c854859805a9d24720b472612570"
+      },
+      {
+        "time": "2026-10-09T12:24:14+00:00",
+        "kernel": "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K3072_e96_s32f00g0",
+        "vgpr": 358,
+        "lds": 80896,
+        "cache_file": "/root/.flydsl/cache/launch_gemm_a8w4_tdm_cd2e8679810626e64ca327f9ae0acd7a/9aa6e8c058e42696.pkl",
+        "manager": "launch_gemm_a8w4_tdm_cd2e8679810626e64ca327f9ae0acd7a",
+        "ir_sha256": "1f0455ab3957cae00b3c48aea567b7249c5daeba9c4b54ae6d65bc66d73a8b45"
+      },
+      {
+        "time": "2026-10-09T12:21:49+00:00",
+        "kernel": "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s16f22g1",
+        "vgpr": 360,
+        "lds": 84992,
+        "cache_file": "/root/.flydsl/cache/launch_gemm_a8w4_tdm_cd2e8679810626e64ca327f9ae0acd7a/5b9c1aa0ad5a78cd.pkl",
+        "manager": "launch_gemm_a8w4_tdm_cd2e8679810626e64ca327f9ae0acd7a",
+        "ir_sha256": "ce1959c3a162221b78870562076d952edf37eca577f16c5982f3cf24d8942cbb"
+      },
+      {
+        "time": "2026-10-09T12:23:11+00:00",
+        "kernel": "a8w4_tdm_fp4_t32x512x256_w1x4_b2_K3072_e96_s16f22g1",
+        "vgpr": 248,
+        "lds": 157696,
+        "cache_file": "/root/.flydsl/cache/launch_gemm_a8w4_tdm_cd2e8679810626e64ca327f9ae0acd7a/c4f4ecbe677ccd11.pkl",
+        "manager": "launch_gemm_a8w4_tdm_cd2e8679810626e64ca327f9ae0acd7a",
+        "ir_sha256": "a8103ec23f0124386532adfdfdf832aa3c2a9a37b536486f2f215cf4b52d6579"
+      },
+      {
+        "time": "2026-10-09T12:21:50+00:00",
+        "kernel": "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K3072_e96_s16f22g1",
+        "vgpr": 358,
+        "lds": 84992,
+        "cache_file": "/root/.flydsl/cache/launch_gemm_a8w4_tdm_cd2e8679810626e64ca327f9ae0acd7a/d5562fbf3e318d1b.pkl",
+        "manager": "launch_gemm_a8w4_tdm_cd2e8679810626e64ca327f9ae0acd7a",
+        "ir_sha256": "866982d10b22b2c29267113e6a76034dcc4eb07bdbe0f2854735020bc5b7dda0"
+      },
+      {
+        "time": "2026-10-09T12:28:33+00:00",
+        "kernel": "a8w4_tdm_fp4_t32x256x128_w1x4_b2_K7168_e96_act1_q1r2_s16f22g1",
+        "vgpr": 128,
+        "lds": 43008,
+        "cache_file": "/root/.flydsl/cache/launch_gemm_a8w4_tdm_60dd8076bd8e3fa48aeca101ff0fd1be/c2121c9c1dcb9acb.pkl",
+        "manager": "launch_gemm_a8w4_tdm_60dd8076bd8e3fa48aeca101ff0fd1be",
+        "ir_sha256": "a74ee4d13e0104d8e25f8a6d639964900b659531a28de9057da4dd07b40a78a0"
+      },
+      {
+        "time": "2026-10-09T12:27:25+00:00",
+        "kernel": "a8w4_tdm_fp4_t32x512x256_w1x4_b2_K3072_e96_s16f22g1",
+        "vgpr": 248,
+        "lds": 157696,
+        "cache_file": "/root/.flydsl/cache/launch_gemm_a8w4_tdm_60dd8076bd8e3fa48aeca101ff0fd1be/c4f4ecbe677ccd11.pkl",
+        "manager": "launch_gemm_a8w4_tdm_60dd8076bd8e3fa48aeca101ff0fd1be",
+        "ir_sha256": "24555c3b7c41d385cc13421f328984cf720a3a5d81109161efe5986329d3c287"
+      },
+      {
+        "time": "2026-10-09T12:28:30+00:00",
+        "kernel": "a8w4_tdm_fp4_t32x256x128_w1x4_b2_K7168_e96_act1_q1r2_s16f00g0",
+        "vgpr": 128,
+        "lds": 43008,
+        "cache_file": "/root/.flydsl/cache/launch_gemm_a8w4_tdm_60dd8076bd8e3fa48aeca101ff0fd1be/8fb9e43e5f6d6fa6.pkl",
+        "manager": "launch_gemm_a8w4_tdm_60dd8076bd8e3fa48aeca101ff0fd1be",
+        "ir_sha256": "2437c8efe6a99974d3d29973b6633bad9f30451d6db5a254bc18c30f6090cc1e"
+      },
+      {
+        "time": "2026-10-09T12:28:31+00:00",
+        "kernel": "a8w4_tdm_fp4_t32x256x128_w1x4_b2_K3072_e96_s16f00g0",
+        "vgpr": 126,
+        "lds": 43008,
+        "cache_file": "/root/.flydsl/cache/launch_gemm_a8w4_tdm_60dd8076bd8e3fa48aeca101ff0fd1be/506315d370dd5835.pkl",
+        "manager": "launch_gemm_a8w4_tdm_60dd8076bd8e3fa48aeca101ff0fd1be",
+        "ir_sha256": "ad81941b47d797ca9d8d9b966f04a3fe53ee5e3d6c4534d513edd491ff29c8a3"
+      }
+    ],
+    "quantizer_artifacts": [
+      {
+        "time": "2026-10-09T12:38:50+00:00",
+        "kernel": "moe_fused_quant_preshuffle_routeks_fd7168_r2_s16f0g1.0_v2_fp4_pk8_srctk6",
+        "cache_file": "/root/.flydsl/cache/launch_fused_5dff847e1d94b0ecdf5fcee7b1d79c44/cb02c7b545dabf34.pkl",
+        "ir_sha256": "96509d6c50576f563d14f0e4e1d76f1263a39d0efc8215e568560845b458c69d"
+      },
+      {
+        "time": "2026-10-09T12:39:26+00:00",
+        "kernel": "moe_fused_quant_preshuffle_routeks_fd7168_r4_s32f0g1.0_v2_fp4_pk8_srctk6",
+        "cache_file": "/root/.flydsl/cache/launch_fused_106b60dd1ce6105aaccdeac4890c890c/cb02c7b545dabf34.pkl",
+        "ir_sha256": "24c6f9d0daa4411b3111d99a753c239a8d23b7fe42e5ebf68db7bd038c32b01a"
+      },
+      {
+        "time": "2026-10-09T12:39:27+00:00",
+        "kernel": "moe_fused_quant_preshuffle_routeks_fd7168_r2_s16f2g0.7_v2_fp4_pk8_srctk6",
+        "cache_file": "/root/.flydsl/cache/launch_fused_7b403aa3c3f87a586cfa8440fc84653e/cb02c7b545dabf34.pkl",
+        "ir_sha256": "343505c79841d78403a4c83b660f009c2de2b013c6404c4932fcaac835b834a3"
+      },
+      {
+        "time": "2026-10-09T12:42:11+00:00",
+        "kernel": "moe_fused_quant_preshuffle_routeks_fd7168_r4_s16f0g1.0_v2_fp4_pk8_srctk6",
+        "cache_file": "/root/.flydsl/cache/launch_fused_d487b2ac92794bef532b5e0aa874fb60/cb02c7b545dabf34.pkl",
+        "ir_sha256": "77cb5c2c759776e52b69b1ec75d33af6d8096e93d71d4fbc6d031f5051caa0fb"
+      },
+      {
+        "time": "2026-10-09T12:42:16+00:00",
+        "kernel": "moe_fused_quant_preshuffle_routeks_fd7168_r4_s16f2g0.7_v2_fp4_pk8_srctk6",
+        "cache_file": "/root/.flydsl/cache/launch_fused_570e383c5cf12284c6f29bd2d50a83a4/cb02c7b545dabf34.pkl",
+        "ir_sha256": "d4d059a1b2f207422d8b9f3f2901f1eadef995c2725855393f2d1fea89876b14"
+      }
+    ]
+  }
+}
