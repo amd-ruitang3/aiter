@@ -1,0 +1,2827 @@
+{
+  "att": {
+    "/tmp/aiter-512-att-repeated": {
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K3072_e96_s16f00g0": {
+        "active_waves": 33,
+        "dispatches": 3,
+        "wmma_counts": {
+          "384": 33
+        },
+        "median_main_span_cycles": 35731,
+        "main_categories": {
+          "barrier_wait": {
+            "count_per_wave": 46.0,
+            "cycles_per_wave": 2161.909090909091,
+            "stall_cycles_per_wave": 2115.909090909091,
+            "cycles_per_instruction": 46.99802371541502
+          },
+          "other": {
+            "count_per_wave": 698.0,
+            "cycles_per_wave": 1157.3636363636363,
+            "stall_cycles_per_wave": 324.3636363636364,
+            "cycles_per_instruction": 1.6581140922115134
+          },
+          "payload_lds": {
+            "count_per_wave": 576.0,
+            "cycles_per_wave": 975.6363636363636,
+            "stall_cycles_per_wave": 399.6363636363636,
+            "cycles_per_instruction": 1.6938131313131313
+          },
+          "scale_lds": {
+            "count_per_wave": 72.0,
+            "cycles_per_wave": 75.36363636363636,
+            "stall_cycles_per_wave": 3.3636363636363638,
+            "cycles_per_instruction": 1.0467171717171717
+          },
+          "tensor_load": {
+            "count_per_wave": 48.0,
+            "cycles_per_wave": 48.0,
+            "stall_cycles_per_wave": 0.0,
+            "cycles_per_instruction": 1.0
+          },
+          "wait_lds": {
+            "count_per_wave": 168.0,
+            "cycles_per_wave": 3458.181818181818,
+            "stall_cycles_per_wave": 3290.181818181818,
+            "cycles_per_instruction": 20.584415584415584
+          },
+          "wait_tensor": {
+            "count_per_wave": 50.0,
+            "cycles_per_wave": 23288.242424242424,
+            "stall_cycles_per_wave": 23238.242424242424,
+            "cycles_per_instruction": 465.76484848484847
+          },
+          "wmma": {
+            "count_per_wave": 384.0,
+            "cycles_per_wave": 3852.121212121212,
+            "stall_cycles_per_wave": 396.1212121212121,
+            "cycles_per_instruction": 10.031565656565656
+          }
+        },
+        "median_epilogue_span_cycles": 1111,
+        "mean_epilogue_store_wait_cycles": 0,
+        "per_dispatch": {
+          "ui_output_agent_30171_dispatch_17": {
+            "active_waves": 10,
+            "median_main_span_cycles": 36800.0,
+            "mean_epilogue_store_wait_cycles": 0
+          },
+          "ui_output_agent_30171_dispatch_18": {
+            "active_waves": 12,
+            "median_main_span_cycles": 35786.0,
+            "mean_epilogue_store_wait_cycles": 0
+          },
+          "ui_output_agent_30171_dispatch_19": {
+            "active_waves": 11,
+            "median_main_span_cycles": 35626,
+            "mean_epilogue_store_wait_cycles": 0
+          }
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K3072_e96_s16f22g0": {
+        "active_waves": 31,
+        "dispatches": 3,
+        "wmma_counts": {
+          "384": 31
+        },
+        "median_main_span_cycles": 36967,
+        "main_categories": {
+          "barrier_wait": {
+            "count_per_wave": 46.0,
+            "cycles_per_wave": 2470.935483870968,
+            "stall_cycles_per_wave": 2424.935483870968,
+            "cycles_per_instruction": 53.715988779803645
+          },
+          "other": {
+            "count_per_wave": 698.0,
+            "cycles_per_wave": 1148.8709677419354,
+            "stall_cycles_per_wave": 315.8709677419355,
+            "cycles_per_instruction": 1.6459469451890194
+          },
+          "payload_lds": {
+            "count_per_wave": 576.0,
+            "cycles_per_wave": 1020.0645161290323,
+            "stall_cycles_per_wave": 444.06451612903226,
+            "cycles_per_instruction": 1.770945340501792
+          },
+          "scale_lds": {
+            "count_per_wave": 72.0,
+            "cycles_per_wave": 77.74193548387096,
+            "stall_cycles_per_wave": 5.741935483870968,
+            "cycles_per_instruction": 1.0797491039426523
+          },
+          "tensor_load": {
+            "count_per_wave": 48.0,
+            "cycles_per_wave": 48.0,
+            "stall_cycles_per_wave": 0.0,
+            "cycles_per_instruction": 1.0
+          },
+          "wait_lds": {
+            "count_per_wave": 168.0,
+            "cycles_per_wave": 3480.1612903225805,
+            "stall_cycles_per_wave": 3312.1612903225805,
+            "cycles_per_instruction": 20.715245775729645
+          },
+          "wait_tensor": {
+            "count_per_wave": 50.0,
+            "cycles_per_wave": 24169.41935483871,
+            "stall_cycles_per_wave": 24119.41935483871,
+            "cycles_per_instruction": 483.3883870967742
+          },
+          "wmma": {
+            "count_per_wave": 384.0,
+            "cycles_per_wave": 3865.1612903225805,
+            "stall_cycles_per_wave": 409.16129032258067,
+            "cycles_per_instruction": 10.065524193548388
+          }
+        },
+        "median_epilogue_span_cycles": 1121,
+        "mean_epilogue_store_wait_cycles": 0,
+        "per_dispatch": {
+          "ui_output_agent_30171_dispatch_27": {
+            "active_waves": 11,
+            "median_main_span_cycles": 36830,
+            "mean_epilogue_store_wait_cycles": 0
+          },
+          "ui_output_agent_30171_dispatch_28": {
+            "active_waves": 10,
+            "median_main_span_cycles": 36944.5,
+            "mean_epilogue_store_wait_cycles": 0
+          },
+          "ui_output_agent_30171_dispatch_29": {
+            "active_waves": 10,
+            "median_main_span_cycles": 37118.5,
+            "mean_epilogue_store_wait_cycles": 0
+          }
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K3072_e96_s16f22g1": {
+        "active_waves": 35,
+        "dispatches": 3,
+        "wmma_counts": {
+          "384": 35
+        },
+        "median_main_span_cycles": 37625,
+        "main_categories": {
+          "barrier_wait": {
+            "count_per_wave": 46.0,
+            "cycles_per_wave": 2593.0,
+            "stall_cycles_per_wave": 2547.0,
+            "cycles_per_instruction": 56.369565217391305
+          },
+          "other": {
+            "count_per_wave": 698.0,
+            "cycles_per_wave": 1165.9714285714285,
+            "stall_cycles_per_wave": 332.9714285714286,
+            "cycles_per_instruction": 1.6704461727384363
+          },
+          "payload_lds": {
+            "count_per_wave": 576.0,
+            "cycles_per_wave": 952.1142857142858,
+            "stall_cycles_per_wave": 376.1142857142857,
+            "cycles_per_instruction": 1.6529761904761904
+          },
+          "scale_lds": {
+            "count_per_wave": 72.0,
+            "cycles_per_wave": 83.22857142857143,
+            "stall_cycles_per_wave": 11.228571428571428,
+            "cycles_per_instruction": 1.1559523809523808
+          },
+          "tensor_load": {
+            "count_per_wave": 48.0,
+            "cycles_per_wave": 48.0,
+            "stall_cycles_per_wave": 0.0,
+            "cycles_per_instruction": 1.0
+          },
+          "wait_lds": {
+            "count_per_wave": 168.0,
+            "cycles_per_wave": 3462.5142857142855,
+            "stall_cycles_per_wave": 3294.5142857142855,
+            "cycles_per_instruction": 20.610204081632652
+          },
+          "wait_tensor": {
+            "count_per_wave": 50.0,
+            "cycles_per_wave": 23855.628571428573,
+            "stall_cycles_per_wave": 23805.628571428573,
+            "cycles_per_instruction": 477.1125714285714
+          },
+          "wmma": {
+            "count_per_wave": 384.0,
+            "cycles_per_wave": 3875.542857142857,
+            "stall_cycles_per_wave": 419.54285714285714,
+            "cycles_per_instruction": 10.092559523809523
+          }
+        },
+        "median_epilogue_span_cycles": 1201,
+        "mean_epilogue_store_wait_cycles": 0,
+        "per_dispatch": {
+          "ui_output_agent_30171_dispatch_37": {
+            "active_waves": 12,
+            "median_main_span_cycles": 37152.0,
+            "mean_epilogue_store_wait_cycles": 0
+          },
+          "ui_output_agent_30171_dispatch_38": {
+            "active_waves": 12,
+            "median_main_span_cycles": 37422.5,
+            "mean_epilogue_store_wait_cycles": 0
+          },
+          "ui_output_agent_30171_dispatch_39": {
+            "active_waves": 11,
+            "median_main_span_cycles": 38979,
+            "mean_epilogue_store_wait_cycles": 0
+          }
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K3072_e96_s32f00g0": {
+        "active_waves": 33,
+        "dispatches": 3,
+        "wmma_counts": {
+          "384": 33
+        },
+        "median_main_span_cycles": 33881,
+        "main_categories": {
+          "barrier_wait": {
+            "count_per_wave": 46.0,
+            "cycles_per_wave": 3043.242424242424,
+            "stall_cycles_per_wave": 2997.242424242424,
+            "cycles_per_instruction": 66.1574440052701
+          },
+          "other": {
+            "count_per_wave": 674.0,
+            "cycles_per_wave": 1087.8484848484848,
+            "stall_cycles_per_wave": 278.8484848484849,
+            "cycles_per_instruction": 1.6140185235140725
+          },
+          "payload_lds": {
+            "count_per_wave": 576.0,
+            "cycles_per_wave": 886.8787878787879,
+            "stall_cycles_per_wave": 310.8787878787879,
+            "cycles_per_instruction": 1.5397201178451179
+          },
+          "scale_lds": {
+            "count_per_wave": 72.0,
+            "cycles_per_wave": 72.36363636363636,
+            "stall_cycles_per_wave": 0.36363636363636365,
+            "cycles_per_instruction": 1.005050505050505
+          },
+          "tensor_load": {
+            "count_per_wave": 48.0,
+            "cycles_per_wave": 48.0,
+            "stall_cycles_per_wave": 0.0,
+            "cycles_per_instruction": 1.0
+          },
+          "wait_lds": {
+            "count_per_wave": 168.0,
+            "cycles_per_wave": 3490.3636363636365,
+            "stall_cycles_per_wave": 3322.3636363636365,
+            "cycles_per_instruction": 20.775974025974026
+          },
+          "wait_tensor": {
+            "count_per_wave": 50.0,
+            "cycles_per_wave": 21810.545454545456,
+            "stall_cycles_per_wave": 21760.545454545456,
+            "cycles_per_instruction": 436.21090909090907
+          },
+          "wmma": {
+            "count_per_wave": 384.0,
+            "cycles_per_wave": 3876.151515151515,
+            "stall_cycles_per_wave": 420.1515151515151,
+            "cycles_per_instruction": 10.094144570707071
+          }
+        },
+        "median_epilogue_span_cycles": 1121,
+        "mean_epilogue_store_wait_cycles": 0,
+        "per_dispatch": {
+          "ui_output_agent_30171_dispatch_7": {
+            "active_waves": 11,
+            "median_main_span_cycles": 33727,
+            "mean_epilogue_store_wait_cycles": 0
+          },
+          "ui_output_agent_30171_dispatch_8": {
+            "active_waves": 11,
+            "median_main_span_cycles": 33881,
+            "mean_epilogue_store_wait_cycles": 0
+          },
+          "ui_output_agent_30171_dispatch_9": {
+            "active_waves": 11,
+            "median_main_span_cycles": 34090,
+            "mean_epilogue_store_wait_cycles": 0
+          }
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s16f00g0": {
+        "active_waves": 27,
+        "dispatches": 3,
+        "wmma_counts": {
+          "896": 27
+        },
+        "median_main_span_cycles": 87392,
+        "main_categories": {
+          "barrier_wait": {
+            "count_per_wave": 110.0,
+            "cycles_per_wave": 5341.777777777777,
+            "stall_cycles_per_wave": 5231.777777777777,
+            "cycles_per_instruction": 48.561616161616165
+          },
+          "other": {
+            "count_per_wave": 1371.0,
+            "cycles_per_wave": 2066.5555555555557,
+            "stall_cycles_per_wave": 560.5555555555555,
+            "cycles_per_instruction": 1.5073344679471594
+          },
+          "payload_lds": {
+            "count_per_wave": 1344.0,
+            "cycles_per_wave": 2124.296296296296,
+            "stall_cycles_per_wave": 780.2962962962963,
+            "cycles_per_instruction": 1.5805776014109347
+          },
+          "scale_lds": {
+            "count_per_wave": 168.0,
+            "cycles_per_wave": 173.8148148148148,
+            "stall_cycles_per_wave": 5.814814814814815,
+            "cycles_per_instruction": 1.0346119929453264
+          },
+          "tensor_load": {
+            "count_per_wave": 112.0,
+            "cycles_per_wave": 112.0,
+            "stall_cycles_per_wave": 0.0,
+            "cycles_per_instruction": 1.0
+          },
+          "wait_lds": {
+            "count_per_wave": 392.0,
+            "cycles_per_wave": 8106.148148148148,
+            "stall_cycles_per_wave": 7714.148148148148,
+            "cycles_per_instruction": 20.678949357520786
+          },
+          "wait_tensor": {
+            "count_per_wave": 114.0,
+            "cycles_per_wave": 57727.333333333336,
+            "stall_cycles_per_wave": 57613.333333333336,
+            "cycles_per_instruction": 506.3801169590643
+          },
+          "wmma": {
+            "count_per_wave": 896.0,
+            "cycles_per_wave": 8926.62962962963,
+            "stall_cycles_per_wave": 862.6296296296297,
+            "cycles_per_instruction": 9.962756283068783
+          }
+        },
+        "median_epilogue_span_cycles": 3727,
+        "mean_epilogue_store_wait_cycles": 692.4074074074074,
+        "per_dispatch": {
+          "ui_output_agent_30171_dispatch_12": {
+            "active_waves": 9,
+            "median_main_span_cycles": 83909,
+            "mean_epilogue_store_wait_cycles": 664.1111111111111
+          },
+          "ui_output_agent_30171_dispatch_13": {
+            "active_waves": 8,
+            "median_main_span_cycles": 90919.5,
+            "mean_epilogue_store_wait_cycles": 694.875
+          },
+          "ui_output_agent_30171_dispatch_14": {
+            "active_waves": 10,
+            "median_main_span_cycles": 84107.5,
+            "mean_epilogue_store_wait_cycles": 715.9
+          }
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s16f22g0": {
+        "active_waves": 28,
+        "dispatches": 3,
+        "wmma_counts": {
+          "896": 28
+        },
+        "median_main_span_cycles": 85033.5,
+        "main_categories": {
+          "barrier_wait": {
+            "count_per_wave": 110.0,
+            "cycles_per_wave": 4056.964285714286,
+            "stall_cycles_per_wave": 3946.964285714286,
+            "cycles_per_instruction": 36.881493506493506
+          },
+          "other": {
+            "count_per_wave": 1371.0,
+            "cycles_per_wave": 2057.3571428571427,
+            "stall_cycles_per_wave": 551.3571428571429,
+            "cycles_per_instruction": 1.5006251953735543
+          },
+          "payload_lds": {
+            "count_per_wave": 1344.0,
+            "cycles_per_wave": 2232.75,
+            "stall_cycles_per_wave": 888.75,
+            "cycles_per_instruction": 1.6612723214285714
+          },
+          "scale_lds": {
+            "count_per_wave": 168.0,
+            "cycles_per_wave": 184.96428571428572,
+            "stall_cycles_per_wave": 16.964285714285715,
+            "cycles_per_instruction": 1.1009778911564625
+          },
+          "tensor_load": {
+            "count_per_wave": 112.0,
+            "cycles_per_wave": 112.0,
+            "stall_cycles_per_wave": 0.0,
+            "cycles_per_instruction": 1.0
+          },
+          "wait_lds": {
+            "count_per_wave": 392.0,
+            "cycles_per_wave": 8170.642857142857,
+            "stall_cycles_per_wave": 7778.642857142857,
+            "cycles_per_instruction": 20.84347667638484
+          },
+          "wait_tensor": {
+            "count_per_wave": 114.0,
+            "cycles_per_wave": 54340.46428571428,
+            "stall_cycles_per_wave": 54226.46428571428,
+            "cycles_per_instruction": 476.67073934837094
+          },
+          "wmma": {
+            "count_per_wave": 896.0,
+            "cycles_per_wave": 8937.32142857143,
+            "stall_cycles_per_wave": 873.3214285714286,
+            "cycles_per_instruction": 9.974689094387756
+          }
+        },
+        "median_epilogue_span_cycles": 4402.0,
+        "mean_epilogue_store_wait_cycles": 660.25,
+        "per_dispatch": {
+          "ui_output_agent_30171_dispatch_22": {
+            "active_waves": 9,
+            "median_main_span_cycles": 83945,
+            "mean_epilogue_store_wait_cycles": 637.3333333333334
+          },
+          "ui_output_agent_30171_dispatch_23": {
+            "active_waves": 11,
+            "median_main_span_cycles": 82714,
+            "mean_epilogue_store_wait_cycles": 643.5454545454545
+          },
+          "ui_output_agent_30171_dispatch_24": {
+            "active_waves": 8,
+            "median_main_span_cycles": 85252.0,
+            "mean_epilogue_store_wait_cycles": 709
+          }
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s16f22g1": {
+        "active_waves": 26,
+        "dispatches": 3,
+        "wmma_counts": {
+          "896": 26
+        },
+        "median_main_span_cycles": 91396.5,
+        "main_categories": {
+          "barrier_wait": {
+            "count_per_wave": 110.0,
+            "cycles_per_wave": 8043.615384615385,
+            "stall_cycles_per_wave": 7933.615384615385,
+            "cycles_per_instruction": 73.12377622377622
+          },
+          "other": {
+            "count_per_wave": 1371.0,
+            "cycles_per_wave": 2063.8846153846152,
+            "stall_cycles_per_wave": 557.8846153846154,
+            "cycles_per_instruction": 1.5053862986029287
+          },
+          "payload_lds": {
+            "count_per_wave": 1344.0,
+            "cycles_per_wave": 2148.846153846154,
+            "stall_cycles_per_wave": 804.8461538461538,
+            "cycles_per_instruction": 1.5988438644688645
+          },
+          "scale_lds": {
+            "count_per_wave": 168.0,
+            "cycles_per_wave": 174.92307692307693,
+            "stall_cycles_per_wave": 6.923076923076923,
+            "cycles_per_instruction": 1.0412087912087913
+          },
+          "tensor_load": {
+            "count_per_wave": 112.0,
+            "cycles_per_wave": 112.0,
+            "stall_cycles_per_wave": 0.0,
+            "cycles_per_instruction": 1.0
+          },
+          "wait_lds": {
+            "count_per_wave": 392.0,
+            "cycles_per_wave": 8088.961538461538,
+            "stall_cycles_per_wave": 7696.961538461538,
+            "cycles_per_instruction": 20.635105965463108
+          },
+          "wait_tensor": {
+            "count_per_wave": 114.0,
+            "cycles_per_wave": 58517.153846153844,
+            "stall_cycles_per_wave": 58403.153846153844,
+            "cycles_per_instruction": 513.3083670715249
+          },
+          "wmma": {
+            "count_per_wave": 896.0,
+            "cycles_per_wave": 8943.615384615385,
+            "stall_cycles_per_wave": 879.6153846153846,
+            "cycles_per_instruction": 9.981713598901099
+          }
+        },
+        "median_epilogue_span_cycles": 4619.0,
+        "mean_epilogue_store_wait_cycles": 711.2307692307693,
+        "per_dispatch": {
+          "ui_output_agent_30171_dispatch_32": {
+            "active_waves": 8,
+            "median_main_span_cycles": 95046.0,
+            "mean_epilogue_store_wait_cycles": 737.125
+          },
+          "ui_output_agent_30171_dispatch_33": {
+            "active_waves": 9,
+            "median_main_span_cycles": 89073,
+            "mean_epilogue_store_wait_cycles": 686.3333333333334
+          },
+          "ui_output_agent_30171_dispatch_34": {
+            "active_waves": 9,
+            "median_main_span_cycles": 86621,
+            "mean_epilogue_store_wait_cycles": 713.1111111111111
+          }
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s32f00g0": {
+        "active_waves": 25,
+        "dispatches": 3,
+        "wmma_counts": {
+          "896": 25
+        },
+        "median_main_span_cycles": 83392,
+        "main_categories": {
+          "barrier_wait": {
+            "count_per_wave": 110.0,
+            "cycles_per_wave": 7561.4,
+            "stall_cycles_per_wave": 7451.4,
+            "cycles_per_instruction": 68.74
+          },
+          "other": {
+            "count_per_wave": 1315.0,
+            "cycles_per_wave": 1946.32,
+            "stall_cycles_per_wave": 496.32,
+            "cycles_per_instruction": 1.4800912547528517
+          },
+          "payload_lds": {
+            "count_per_wave": 1344.0,
+            "cycles_per_wave": 2127.12,
+            "stall_cycles_per_wave": 783.12,
+            "cycles_per_instruction": 1.5826785714285714
+          },
+          "scale_lds": {
+            "count_per_wave": 168.0,
+            "cycles_per_wave": 168.0,
+            "stall_cycles_per_wave": 0.0,
+            "cycles_per_instruction": 1.0
+          },
+          "tensor_load": {
+            "count_per_wave": 112.0,
+            "cycles_per_wave": 112.0,
+            "stall_cycles_per_wave": 0.0,
+            "cycles_per_instruction": 1.0
+          },
+          "wait_lds": {
+            "count_per_wave": 392.0,
+            "cycles_per_wave": 8204.92,
+            "stall_cycles_per_wave": 7812.92,
+            "cycles_per_instruction": 20.930918367346937
+          },
+          "wait_tensor": {
+            "count_per_wave": 114.0,
+            "cycles_per_wave": 52917.32,
+            "stall_cycles_per_wave": 52803.32,
+            "cycles_per_instruction": 464.18701754385967
+          },
+          "wmma": {
+            "count_per_wave": 896.0,
+            "cycles_per_wave": 9015.8,
+            "stall_cycles_per_wave": 951.8,
+            "cycles_per_instruction": 10.062276785714285
+          }
+        },
+        "median_epilogue_span_cycles": 2720,
+        "mean_epilogue_store_wait_cycles": 126.92,
+        "per_dispatch": {
+          "ui_output_agent_30171_dispatch_2": {
+            "active_waves": 8,
+            "median_main_span_cycles": 87309.0,
+            "mean_epilogue_store_wait_cycles": 117.125
+          },
+          "ui_output_agent_30171_dispatch_3": {
+            "active_waves": 9,
+            "median_main_span_cycles": 80458,
+            "mean_epilogue_store_wait_cycles": 130.88888888888889
+          },
+          "ui_output_agent_30171_dispatch_4": {
+            "active_waves": 8,
+            "median_main_span_cycles": 84888.5,
+            "mean_epilogue_store_wait_cycles": 132.25
+          }
+        }
+      }
+    },
+    "/tmp/aiter-512-att-packed": {
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s16f00g0": {
+        "active_waves": 25,
+        "dispatches": 3,
+        "wmma_counts": {
+          "896": 25
+        },
+        "median_main_span_cycles": 90588,
+        "main_categories": {
+          "barrier_wait": {
+            "count_per_wave": 110.0,
+            "cycles_per_wave": 7363.08,
+            "stall_cycles_per_wave": 7253.08,
+            "cycles_per_instruction": 66.93709090909091
+          },
+          "other": {
+            "count_per_wave": 1371.0,
+            "cycles_per_wave": 2094.4,
+            "stall_cycles_per_wave": 588.4,
+            "cycles_per_instruction": 1.5276440554339898
+          },
+          "payload_lds": {
+            "count_per_wave": 1344.0,
+            "cycles_per_wave": 2263.08,
+            "stall_cycles_per_wave": 919.08,
+            "cycles_per_instruction": 1.6838392857142856
+          },
+          "scale_lds": {
+            "count_per_wave": 168.0,
+            "cycles_per_wave": 176.24,
+            "stall_cycles_per_wave": 8.24,
+            "cycles_per_instruction": 1.049047619047619
+          },
+          "tensor_load": {
+            "count_per_wave": 112.0,
+            "cycles_per_wave": 112.0,
+            "stall_cycles_per_wave": 0.0,
+            "cycles_per_instruction": 1.0
+          },
+          "wait_lds": {
+            "count_per_wave": 392.0,
+            "cycles_per_wave": 8141.24,
+            "stall_cycles_per_wave": 7749.24,
+            "cycles_per_instruction": 20.7684693877551
+          },
+          "wait_tensor": {
+            "count_per_wave": 114.0,
+            "cycles_per_wave": 59245.0,
+            "stall_cycles_per_wave": 59131.0,
+            "cycles_per_instruction": 519.6929824561404
+          },
+          "wmma": {
+            "count_per_wave": 896.0,
+            "cycles_per_wave": 8936.08,
+            "stall_cycles_per_wave": 872.08,
+            "cycles_per_instruction": 9.973303571428572
+          }
+        },
+        "median_epilogue_span_cycles": 3072,
+        "mean_epilogue_store_wait_cycles": 115.56,
+        "per_dispatch": {
+          "ui_output_agent_57036_dispatch_7": {
+            "active_waves": 8,
+            "median_main_span_cycles": 91627.5,
+            "mean_epilogue_store_wait_cycles": 110.625
+          },
+          "ui_output_agent_57036_dispatch_8": {
+            "active_waves": 8,
+            "median_main_span_cycles": 93204.0,
+            "mean_epilogue_store_wait_cycles": 119.75
+          },
+          "ui_output_agent_57036_dispatch_9": {
+            "active_waves": 9,
+            "median_main_span_cycles": 90003,
+            "mean_epilogue_store_wait_cycles": 116.22222222222223
+          }
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s16f22g0": {
+        "active_waves": 29,
+        "dispatches": 3,
+        "wmma_counts": {
+          "896": 29
+        },
+        "median_main_span_cycles": 90939,
+        "main_categories": {
+          "barrier_wait": {
+            "count_per_wave": 110.0,
+            "cycles_per_wave": 6676.137931034483,
+            "stall_cycles_per_wave": 6566.137931034483,
+            "cycles_per_instruction": 60.69216300940439
+          },
+          "other": {
+            "count_per_wave": 1371.0,
+            "cycles_per_wave": 2059.206896551724,
+            "stall_cycles_per_wave": 553.2068965517242,
+            "cycles_per_instruction": 1.5019743957342993
+          },
+          "payload_lds": {
+            "count_per_wave": 1344.0,
+            "cycles_per_wave": 2009.3793103448277,
+            "stall_cycles_per_wave": 665.3793103448276,
+            "cycles_per_instruction": 1.4950738916256157
+          },
+          "scale_lds": {
+            "count_per_wave": 168.0,
+            "cycles_per_wave": 174.86206896551724,
+            "stall_cycles_per_wave": 6.862068965517241,
+            "cycles_per_instruction": 1.0408456486042692
+          },
+          "tensor_load": {
+            "count_per_wave": 112.0,
+            "cycles_per_wave": 112.0,
+            "stall_cycles_per_wave": 0.0,
+            "cycles_per_instruction": 1.0
+          },
+          "wait_lds": {
+            "count_per_wave": 392.0,
+            "cycles_per_wave": 8144.793103448276,
+            "stall_cycles_per_wave": 7752.793103448276,
+            "cycles_per_instruction": 20.77753342716397
+          },
+          "wait_tensor": {
+            "count_per_wave": 114.0,
+            "cycles_per_wave": 55796.55172413793,
+            "stall_cycles_per_wave": 55682.55172413793,
+            "cycles_per_instruction": 489.4434361766485
+          },
+          "wmma": {
+            "count_per_wave": 896.0,
+            "cycles_per_wave": 8923.103448275862,
+            "stall_cycles_per_wave": 859.1034482758621,
+            "cycles_per_instruction": 9.958820812807883
+          }
+        },
+        "median_epilogue_span_cycles": 3818,
+        "mean_epilogue_store_wait_cycles": 100.48275862068965,
+        "per_dispatch": {
+          "ui_output_agent_57036_dispatch_12": {
+            "active_waves": 8,
+            "median_main_span_cycles": 89857.0,
+            "mean_epilogue_store_wait_cycles": 107.5
+          },
+          "ui_output_agent_57036_dispatch_13": {
+            "active_waves": 11,
+            "median_main_span_cycles": 87942,
+            "mean_epilogue_store_wait_cycles": 98.18181818181819
+          },
+          "ui_output_agent_57036_dispatch_14": {
+            "active_waves": 10,
+            "median_main_span_cycles": 93431.5,
+            "mean_epilogue_store_wait_cycles": 97.4
+          }
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s16f22g1": {
+        "active_waves": 28,
+        "dispatches": 3,
+        "wmma_counts": {
+          "896": 28
+        },
+        "median_main_span_cycles": 85011.0,
+        "main_categories": {
+          "barrier_wait": {
+            "count_per_wave": 110.0,
+            "cycles_per_wave": 6020.607142857143,
+            "stall_cycles_per_wave": 5910.607142857143,
+            "cycles_per_instruction": 54.73279220779221
+          },
+          "other": {
+            "count_per_wave": 1371.0,
+            "cycles_per_wave": 2093.8571428571427,
+            "stall_cycles_per_wave": 587.8571428571429,
+            "cycles_per_instruction": 1.5272480983640722
+          },
+          "payload_lds": {
+            "count_per_wave": 1344.0,
+            "cycles_per_wave": 2121.785714285714,
+            "stall_cycles_per_wave": 777.7857142857143,
+            "cycles_per_instruction": 1.5787096088435375
+          },
+          "scale_lds": {
+            "count_per_wave": 168.0,
+            "cycles_per_wave": 173.35714285714286,
+            "stall_cycles_per_wave": 5.357142857142857,
+            "cycles_per_instruction": 1.031887755102041
+          },
+          "tensor_load": {
+            "count_per_wave": 112.0,
+            "cycles_per_wave": 112.0,
+            "stall_cycles_per_wave": 0.0,
+            "cycles_per_instruction": 1.0
+          },
+          "wait_lds": {
+            "count_per_wave": 392.0,
+            "cycles_per_wave": 8084.714285714285,
+            "stall_cycles_per_wave": 7692.714285714285,
+            "cycles_per_instruction": 20.624271137026238
+          },
+          "wait_tensor": {
+            "count_per_wave": 114.0,
+            "cycles_per_wave": 54561.642857142855,
+            "stall_cycles_per_wave": 54447.642857142855,
+            "cycles_per_instruction": 478.6109022556391
+          },
+          "wmma": {
+            "count_per_wave": 896.0,
+            "cycles_per_wave": 8941.42857142857,
+            "stall_cycles_per_wave": 877.4285714285714,
+            "cycles_per_instruction": 9.979272959183673
+          }
+        },
+        "median_epilogue_span_cycles": 3867.0,
+        "mean_epilogue_store_wait_cycles": 115.82142857142857,
+        "per_dispatch": {
+          "ui_output_agent_57036_dispatch_17": {
+            "active_waves": 9,
+            "median_main_span_cycles": 88504,
+            "mean_epilogue_store_wait_cycles": 114.44444444444444
+          },
+          "ui_output_agent_57036_dispatch_18": {
+            "active_waves": 11,
+            "median_main_span_cycles": 82849,
+            "mean_epilogue_store_wait_cycles": 116.18181818181819
+          },
+          "ui_output_agent_57036_dispatch_19": {
+            "active_waves": 8,
+            "median_main_span_cycles": 87400.0,
+            "mean_epilogue_store_wait_cycles": 116.875
+          }
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s32f00g0": {
+        "active_waves": 29,
+        "dispatches": 3,
+        "wmma_counts": {
+          "896": 29
+        },
+        "median_main_span_cycles": 88763,
+        "main_categories": {
+          "barrier_wait": {
+            "count_per_wave": 110.0,
+            "cycles_per_wave": 8599.586206896553,
+            "stall_cycles_per_wave": 8489.586206896553,
+            "cycles_per_instruction": 78.17805642633229
+          },
+          "other": {
+            "count_per_wave": 1315.0,
+            "cycles_per_wave": 1926.5862068965516,
+            "stall_cycles_per_wave": 476.58620689655174,
+            "cycles_per_instruction": 1.4650845679821687
+          },
+          "payload_lds": {
+            "count_per_wave": 1344.0,
+            "cycles_per_wave": 1989.7241379310344,
+            "stall_cycles_per_wave": 645.7241379310345,
+            "cycles_per_instruction": 1.4804495073891626
+          },
+          "scale_lds": {
+            "count_per_wave": 168.0,
+            "cycles_per_wave": 168.0,
+            "stall_cycles_per_wave": 0.0,
+            "cycles_per_instruction": 1.0
+          },
+          "tensor_load": {
+            "count_per_wave": 112.0,
+            "cycles_per_wave": 112.0,
+            "stall_cycles_per_wave": 0.0,
+            "cycles_per_instruction": 1.0
+          },
+          "wait_lds": {
+            "count_per_wave": 392.0,
+            "cycles_per_wave": 8151.3448275862065,
+            "stall_cycles_per_wave": 7759.3448275862065,
+            "cycles_per_instruction": 20.79424700914849
+          },
+          "wait_tensor": {
+            "count_per_wave": 114.0,
+            "cycles_per_wave": 51017.06896551724,
+            "stall_cycles_per_wave": 50903.06896551724,
+            "cycles_per_instruction": 447.5181488203267
+          },
+          "wmma": {
+            "count_per_wave": 896.0,
+            "cycles_per_wave": 8999.655172413793,
+            "stall_cycles_per_wave": 935.6551724137931,
+            "cycles_per_instruction": 10.044258004926109
+          }
+        },
+        "median_epilogue_span_cycles": 2727,
+        "mean_epilogue_store_wait_cycles": 114.41379310344827,
+        "per_dispatch": {
+          "ui_output_agent_57036_dispatch_2": {
+            "active_waves": 9,
+            "median_main_span_cycles": 83518,
+            "mean_epilogue_store_wait_cycles": 108.33333333333333
+          },
+          "ui_output_agent_57036_dispatch_3": {
+            "active_waves": 10,
+            "median_main_span_cycles": 92340.5,
+            "mean_epilogue_store_wait_cycles": 107.9
+          },
+          "ui_output_agent_57036_dispatch_4": {
+            "active_waves": 10,
+            "median_main_span_cycles": 82413.0,
+            "mean_epilogue_store_wait_cycles": 126.4
+          }
+        }
+      }
+    },
+    "/tmp/aiter-512-att-final": {
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K3072_e96_s16f00g0": {
+        "active_waves": 33,
+        "dispatches": 3,
+        "wmma_counts": {
+          "384": 33
+        },
+        "median_main_span_cycles": 36765,
+        "main_categories": {
+          "barrier_wait": {
+            "count_per_wave": 46.0,
+            "cycles_per_wave": 3379.6060606060605,
+            "stall_cycles_per_wave": 3333.6060606060605,
+            "cycles_per_instruction": 73.46969696969697
+          },
+          "other": {
+            "count_per_wave": 698.0,
+            "cycles_per_wave": 1158.1515151515152,
+            "stall_cycles_per_wave": 325.1515151515151,
+            "cycles_per_instruction": 1.6592428583832595
+          },
+          "payload_lds": {
+            "count_per_wave": 576.0,
+            "cycles_per_wave": 964.3939393939394,
+            "stall_cycles_per_wave": 388.3939393939394,
+            "cycles_per_instruction": 1.6742950336700337
+          },
+          "scale_lds": {
+            "count_per_wave": 72.0,
+            "cycles_per_wave": 78.33333333333333,
+            "stall_cycles_per_wave": 6.333333333333333,
+            "cycles_per_instruction": 1.087962962962963
+          },
+          "tensor_load": {
+            "count_per_wave": 48.0,
+            "cycles_per_wave": 48.0,
+            "stall_cycles_per_wave": 0.0,
+            "cycles_per_instruction": 1.0
+          },
+          "wait_lds": {
+            "count_per_wave": 168.0,
+            "cycles_per_wave": 3475.090909090909,
+            "stall_cycles_per_wave": 3307.090909090909,
+            "cycles_per_instruction": 20.685064935064936
+          },
+          "wait_tensor": {
+            "count_per_wave": 50.0,
+            "cycles_per_wave": 23178.18181818182,
+            "stall_cycles_per_wave": 23128.18181818182,
+            "cycles_per_instruction": 463.56363636363636
+          },
+          "wmma": {
+            "count_per_wave": 384.0,
+            "cycles_per_wave": 3849.757575757576,
+            "stall_cycles_per_wave": 393.75757575757575,
+            "cycles_per_instruction": 10.025410353535353
+          }
+        },
+        "median_epilogue_span_cycles": 1039,
+        "mean_epilogue_store_wait_cycles": 0,
+        "per_dispatch": {
+          "ui_output_agent_13891_dispatch_10": {
+            "active_waves": 10,
+            "median_main_span_cycles": 39164.5,
+            "mean_epilogue_store_wait_cycles": 0
+          },
+          "ui_output_agent_13891_dispatch_11": {
+            "active_waves": 12,
+            "median_main_span_cycles": 35294.5,
+            "mean_epilogue_store_wait_cycles": 0
+          },
+          "ui_output_agent_13891_dispatch_12": {
+            "active_waves": 11,
+            "median_main_span_cycles": 36356,
+            "mean_epilogue_store_wait_cycles": 0
+          }
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K3072_e96_s16f22g0": {
+        "active_waves": 33,
+        "dispatches": 3,
+        "wmma_counts": {
+          "384": 33
+        },
+        "median_main_span_cycles": 35031,
+        "main_categories": {
+          "barrier_wait": {
+            "count_per_wave": 46.0,
+            "cycles_per_wave": 2329.151515151515,
+            "stall_cycles_per_wave": 2283.151515151515,
+            "cycles_per_instruction": 50.63372859025033
+          },
+          "other": {
+            "count_per_wave": 698.0,
+            "cycles_per_wave": 1167.3030303030303,
+            "stall_cycles_per_wave": 334.3030303030303,
+            "cycles_per_instruction": 1.6723539116089259
+          },
+          "payload_lds": {
+            "count_per_wave": 576.0,
+            "cycles_per_wave": 967.060606060606,
+            "stall_cycles_per_wave": 391.06060606060606,
+            "cycles_per_instruction": 1.6789246632996633
+          },
+          "scale_lds": {
+            "count_per_wave": 72.0,
+            "cycles_per_wave": 76.03030303030303,
+            "stall_cycles_per_wave": 4.03030303030303,
+            "cycles_per_instruction": 1.055976430976431
+          },
+          "tensor_load": {
+            "count_per_wave": 48.0,
+            "cycles_per_wave": 48.0,
+            "stall_cycles_per_wave": 0.0,
+            "cycles_per_instruction": 1.0
+          },
+          "wait_lds": {
+            "count_per_wave": 168.0,
+            "cycles_per_wave": 3430.030303030303,
+            "stall_cycles_per_wave": 3262.030303030303,
+            "cycles_per_instruction": 20.416847041847042
+          },
+          "wait_tensor": {
+            "count_per_wave": 50.0,
+            "cycles_per_wave": 22793.030303030304,
+            "stall_cycles_per_wave": 22743.030303030304,
+            "cycles_per_instruction": 455.8606060606061
+          },
+          "wmma": {
+            "count_per_wave": 384.0,
+            "cycles_per_wave": 3849.4242424242425,
+            "stall_cycles_per_wave": 393.42424242424244,
+            "cycles_per_instruction": 10.024542297979798
+          }
+        },
+        "median_epilogue_span_cycles": 1110,
+        "mean_epilogue_store_wait_cycles": 0,
+        "per_dispatch": {
+          "ui_output_agent_13891_dispatch_16": {
+            "active_waves": 12,
+            "median_main_span_cycles": 34841.0,
+            "mean_epilogue_store_wait_cycles": 0
+          },
+          "ui_output_agent_13891_dispatch_17": {
+            "active_waves": 10,
+            "median_main_span_cycles": 35818.5,
+            "mean_epilogue_store_wait_cycles": 0
+          },
+          "ui_output_agent_13891_dispatch_18": {
+            "active_waves": 11,
+            "median_main_span_cycles": 34987,
+            "mean_epilogue_store_wait_cycles": 0
+          }
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K3072_e96_s16f22g1": {
+        "active_waves": 34,
+        "dispatches": 3,
+        "wmma_counts": {
+          "384": 34
+        },
+        "median_main_span_cycles": 36459.0,
+        "main_categories": {
+          "barrier_wait": {
+            "count_per_wave": 46.0,
+            "cycles_per_wave": 2686.705882352941,
+            "stall_cycles_per_wave": 2640.705882352941,
+            "cycles_per_instruction": 58.406649616368284
+          },
+          "other": {
+            "count_per_wave": 698.0,
+            "cycles_per_wave": 1130.6176470588234,
+            "stall_cycles_per_wave": 297.61764705882354,
+            "cycles_per_instruction": 1.6197960559581999
+          },
+          "payload_lds": {
+            "count_per_wave": 576.0,
+            "cycles_per_wave": 974.0294117647059,
+            "stall_cycles_per_wave": 398.02941176470586,
+            "cycles_per_instruction": 1.6910232843137254
+          },
+          "scale_lds": {
+            "count_per_wave": 72.0,
+            "cycles_per_wave": 76.38235294117646,
+            "stall_cycles_per_wave": 4.382352941176471,
+            "cycles_per_instruction": 1.0608660130718954
+          },
+          "tensor_load": {
+            "count_per_wave": 48.0,
+            "cycles_per_wave": 48.0,
+            "stall_cycles_per_wave": 0.0,
+            "cycles_per_instruction": 1.0
+          },
+          "wait_lds": {
+            "count_per_wave": 168.0,
+            "cycles_per_wave": 3454.676470588235,
+            "stall_cycles_per_wave": 3286.676470588235,
+            "cycles_per_instruction": 20.563550420168067
+          },
+          "wait_tensor": {
+            "count_per_wave": 50.0,
+            "cycles_per_wave": 23302.29411764706,
+            "stall_cycles_per_wave": 23252.29411764706,
+            "cycles_per_instruction": 466.0458823529412
+          },
+          "wmma": {
+            "count_per_wave": 384.0,
+            "cycles_per_wave": 3854.4117647058824,
+            "stall_cycles_per_wave": 398.4117647058824,
+            "cycles_per_instruction": 10.037530637254902
+          }
+        },
+        "median_epilogue_span_cycles": 1142.0,
+        "mean_epilogue_store_wait_cycles": 0,
+        "per_dispatch": {
+          "ui_output_agent_13891_dispatch_22": {
+            "active_waves": 11,
+            "median_main_span_cycles": 36544,
+            "mean_epilogue_store_wait_cycles": 0
+          },
+          "ui_output_agent_13891_dispatch_23": {
+            "active_waves": 11,
+            "median_main_span_cycles": 36209,
+            "mean_epilogue_store_wait_cycles": 0
+          },
+          "ui_output_agent_13891_dispatch_24": {
+            "active_waves": 12,
+            "median_main_span_cycles": 36516.0,
+            "mean_epilogue_store_wait_cycles": 0
+          }
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K3072_e96_s32f00g0": {
+        "active_waves": 33,
+        "dispatches": 3,
+        "wmma_counts": {
+          "384": 33
+        },
+        "median_main_span_cycles": 36365,
+        "main_categories": {
+          "barrier_wait": {
+            "count_per_wave": 46.0,
+            "cycles_per_wave": 4256.0,
+            "stall_cycles_per_wave": 4210.0,
+            "cycles_per_instruction": 92.52173913043478
+          },
+          "other": {
+            "count_per_wave": 674.0,
+            "cycles_per_wave": 1102.8484848484848,
+            "stall_cycles_per_wave": 293.8484848484849,
+            "cycles_per_instruction": 1.6362737163924108
+          },
+          "payload_lds": {
+            "count_per_wave": 576.0,
+            "cycles_per_wave": 896.7272727272727,
+            "stall_cycles_per_wave": 320.72727272727275,
+            "cycles_per_instruction": 1.5568181818181819
+          },
+          "scale_lds": {
+            "count_per_wave": 72.0,
+            "cycles_per_wave": 73.15151515151516,
+            "stall_cycles_per_wave": 1.1515151515151516,
+            "cycles_per_instruction": 1.015993265993266
+          },
+          "tensor_load": {
+            "count_per_wave": 48.0,
+            "cycles_per_wave": 48.0,
+            "stall_cycles_per_wave": 0.0,
+            "cycles_per_instruction": 1.0
+          },
+          "wait_lds": {
+            "count_per_wave": 168.0,
+            "cycles_per_wave": 3501.909090909091,
+            "stall_cycles_per_wave": 3333.909090909091,
+            "cycles_per_instruction": 20.84469696969697
+          },
+          "wait_tensor": {
+            "count_per_wave": 50.0,
+            "cycles_per_wave": 22131.878787878788,
+            "stall_cycles_per_wave": 22081.878787878788,
+            "cycles_per_instruction": 442.63757575757575
+          },
+          "wmma": {
+            "count_per_wave": 384.0,
+            "cycles_per_wave": 3875.2727272727275,
+            "stall_cycles_per_wave": 419.3030303030303,
+            "cycles_per_instruction": 10.09185606060606
+          }
+        },
+        "median_epilogue_span_cycles": 1193,
+        "mean_epilogue_store_wait_cycles": 0,
+        "per_dispatch": {
+          "ui_output_agent_13891_dispatch_4": {
+            "active_waves": 11,
+            "median_main_span_cycles": 38660,
+            "mean_epilogue_store_wait_cycles": 0
+          },
+          "ui_output_agent_13891_dispatch_5": {
+            "active_waves": 11,
+            "median_main_span_cycles": 33635,
+            "mean_epilogue_store_wait_cycles": 0
+          },
+          "ui_output_agent_13891_dispatch_6": {
+            "active_waves": 11,
+            "median_main_span_cycles": 37525,
+            "mean_epilogue_store_wait_cycles": 0
+          }
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s16f00g0": {
+        "active_waves": 28,
+        "dispatches": 3,
+        "wmma_counts": {
+          "896": 28
+        },
+        "median_main_span_cycles": 85149.5,
+        "main_categories": {
+          "barrier_wait": {
+            "count_per_wave": 110.0,
+            "cycles_per_wave": 4029.5,
+            "stall_cycles_per_wave": 3919.5,
+            "cycles_per_instruction": 36.63181818181818
+          },
+          "other": {
+            "count_per_wave": 1371.0,
+            "cycles_per_wave": 2077.8571428571427,
+            "stall_cycles_per_wave": 571.8571428571429,
+            "cycles_per_instruction": 1.515577784724393
+          },
+          "payload_lds": {
+            "count_per_wave": 1344.0,
+            "cycles_per_wave": 2166.214285714286,
+            "stall_cycles_per_wave": 822.2142857142857,
+            "cycles_per_instruction": 1.611766581632653
+          },
+          "scale_lds": {
+            "count_per_wave": 168.0,
+            "cycles_per_wave": 173.57142857142858,
+            "stall_cycles_per_wave": 5.571428571428571,
+            "cycles_per_instruction": 1.0331632653061225
+          },
+          "tensor_load": {
+            "count_per_wave": 112.0,
+            "cycles_per_wave": 112.0,
+            "stall_cycles_per_wave": 0.0,
+            "cycles_per_instruction": 1.0
+          },
+          "wait_lds": {
+            "count_per_wave": 392.0,
+            "cycles_per_wave": 8097.857142857143,
+            "stall_cycles_per_wave": 7705.857142857143,
+            "cycles_per_instruction": 20.657798833819243
+          },
+          "wait_tensor": {
+            "count_per_wave": 114.0,
+            "cycles_per_wave": 54714.25,
+            "stall_cycles_per_wave": 54600.25,
+            "cycles_per_instruction": 479.94956140350877
+          },
+          "wmma": {
+            "count_per_wave": 896.0,
+            "cycles_per_wave": 8930.035714285714,
+            "stall_cycles_per_wave": 866.0357142857143,
+            "cycles_per_instruction": 9.966557716836734
+          }
+        },
+        "median_epilogue_span_cycles": 3076.0,
+        "mean_epilogue_store_wait_cycles": 114.21428571428571,
+        "per_dispatch": {
+          "ui_output_agent_13891_dispatch_7": {
+            "active_waves": 9,
+            "median_main_span_cycles": 85357,
+            "mean_epilogue_store_wait_cycles": 118.33333333333333
+          },
+          "ui_output_agent_13891_dispatch_8": {
+            "active_waves": 10,
+            "median_main_span_cycles": 85539.0,
+            "mean_epilogue_store_wait_cycles": 108.2
+          },
+          "ui_output_agent_13891_dispatch_9": {
+            "active_waves": 9,
+            "median_main_span_cycles": 84135,
+            "mean_epilogue_store_wait_cycles": 116.77777777777777
+          }
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s16f22g0": {
+        "active_waves": 28,
+        "dispatches": 3,
+        "wmma_counts": {
+          "896": 28
+        },
+        "median_main_span_cycles": 89785.0,
+        "main_categories": {
+          "barrier_wait": {
+            "count_per_wave": 110.0,
+            "cycles_per_wave": 7998.5,
+            "stall_cycles_per_wave": 7888.5,
+            "cycles_per_instruction": 72.71363636363637
+          },
+          "other": {
+            "count_per_wave": 1371.0,
+            "cycles_per_wave": 2068.9285714285716,
+            "stall_cycles_per_wave": 562.9285714285714,
+            "cycles_per_instruction": 1.5090653329165364
+          },
+          "payload_lds": {
+            "count_per_wave": 1344.0,
+            "cycles_per_wave": 2072.464285714286,
+            "stall_cycles_per_wave": 728.4642857142857,
+            "cycles_per_instruction": 1.5420121173469388
+          },
+          "scale_lds": {
+            "count_per_wave": 168.0,
+            "cycles_per_wave": 174.0,
+            "stall_cycles_per_wave": 6.0,
+            "cycles_per_instruction": 1.0357142857142858
+          },
+          "tensor_load": {
+            "count_per_wave": 112.0,
+            "cycles_per_wave": 112.0,
+            "stall_cycles_per_wave": 0.0,
+            "cycles_per_instruction": 1.0
+          },
+          "wait_lds": {
+            "count_per_wave": 392.0,
+            "cycles_per_wave": 8104.107142857143,
+            "stall_cycles_per_wave": 7712.107142857143,
+            "cycles_per_instruction": 20.673742711370263
+          },
+          "wait_tensor": {
+            "count_per_wave": 114.0,
+            "cycles_per_wave": 55659.17857142857,
+            "stall_cycles_per_wave": 55545.17857142857,
+            "cycles_per_instruction": 488.23840852130326
+          },
+          "wmma": {
+            "count_per_wave": 896.0,
+            "cycles_per_wave": 8927.035714285714,
+            "stall_cycles_per_wave": 863.0357142857143,
+            "cycles_per_instruction": 9.96320950255102
+          }
+        },
+        "median_epilogue_span_cycles": 3804.5,
+        "mean_epilogue_store_wait_cycles": 107.89285714285714,
+        "per_dispatch": {
+          "ui_output_agent_13891_dispatch_13": {
+            "active_waves": 11,
+            "median_main_span_cycles": 81048,
+            "mean_epilogue_store_wait_cycles": 114
+          },
+          "ui_output_agent_13891_dispatch_14": {
+            "active_waves": 9,
+            "median_main_span_cycles": 94342,
+            "mean_epilogue_store_wait_cycles": 93.55555555555556
+          },
+          "ui_output_agent_13891_dispatch_15": {
+            "active_waves": 8,
+            "median_main_span_cycles": 89897.0,
+            "mean_epilogue_store_wait_cycles": 115.625
+          }
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s16f22g1": {
+        "active_waves": 25,
+        "dispatches": 3,
+        "wmma_counts": {
+          "896": 25
+        },
+        "median_main_span_cycles": 86286,
+        "main_categories": {
+          "barrier_wait": {
+            "count_per_wave": 110.0,
+            "cycles_per_wave": 6977.2,
+            "stall_cycles_per_wave": 6867.2,
+            "cycles_per_instruction": 63.42909090909091
+          },
+          "other": {
+            "count_per_wave": 1371.0,
+            "cycles_per_wave": 2107.88,
+            "stall_cycles_per_wave": 601.88,
+            "cycles_per_instruction": 1.5374762946754195
+          },
+          "payload_lds": {
+            "count_per_wave": 1344.0,
+            "cycles_per_wave": 2151.08,
+            "stall_cycles_per_wave": 807.08,
+            "cycles_per_instruction": 1.6005059523809524
+          },
+          "scale_lds": {
+            "count_per_wave": 168.0,
+            "cycles_per_wave": 173.12,
+            "stall_cycles_per_wave": 5.12,
+            "cycles_per_instruction": 1.0304761904761905
+          },
+          "tensor_load": {
+            "count_per_wave": 112.0,
+            "cycles_per_wave": 112.0,
+            "stall_cycles_per_wave": 0.0,
+            "cycles_per_instruction": 1.0
+          },
+          "wait_lds": {
+            "count_per_wave": 392.0,
+            "cycles_per_wave": 8084.04,
+            "stall_cycles_per_wave": 7692.04,
+            "cycles_per_instruction": 20.622551020408164
+          },
+          "wait_tensor": {
+            "count_per_wave": 114.0,
+            "cycles_per_wave": 58574.76,
+            "stall_cycles_per_wave": 58460.76,
+            "cycles_per_instruction": 513.8136842105263
+          },
+          "wmma": {
+            "count_per_wave": 896.0,
+            "cycles_per_wave": 8936.56,
+            "stall_cycles_per_wave": 872.56,
+            "cycles_per_instruction": 9.973839285714286
+          }
+        },
+        "median_epilogue_span_cycles": 3902,
+        "mean_epilogue_store_wait_cycles": 119.84,
+        "per_dispatch": {
+          "ui_output_agent_13891_dispatch_19": {
+            "active_waves": 8,
+            "median_main_span_cycles": 97397.0,
+            "mean_epilogue_store_wait_cycles": 101.125
+          },
+          "ui_output_agent_13891_dispatch_20": {
+            "active_waves": 8,
+            "median_main_span_cycles": 86082.0,
+            "mean_epilogue_store_wait_cycles": 135.75
+          },
+          "ui_output_agent_13891_dispatch_21": {
+            "active_waves": 9,
+            "median_main_span_cycles": 85444,
+            "mean_epilogue_store_wait_cycles": 122.33333333333333
+          }
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s32f00g0": {
+        "active_waves": 28,
+        "dispatches": 3,
+        "wmma_counts": {
+          "896": 28
+        },
+        "median_main_span_cycles": 81117.0,
+        "main_categories": {
+          "barrier_wait": {
+            "count_per_wave": 110.0,
+            "cycles_per_wave": 5719.571428571428,
+            "stall_cycles_per_wave": 5609.571428571428,
+            "cycles_per_instruction": 51.9961038961039
+          },
+          "other": {
+            "count_per_wave": 1315.0,
+            "cycles_per_wave": 1929.107142857143,
+            "stall_cycles_per_wave": 479.10714285714283,
+            "cycles_per_instruction": 1.4670016295491581
+          },
+          "payload_lds": {
+            "count_per_wave": 1344.0,
+            "cycles_per_wave": 1937.0714285714287,
+            "stall_cycles_per_wave": 593.0714285714286,
+            "cycles_per_instruction": 1.4412733843537415
+          },
+          "scale_lds": {
+            "count_per_wave": 168.0,
+            "cycles_per_wave": 168.0,
+            "stall_cycles_per_wave": 0.0,
+            "cycles_per_instruction": 1.0
+          },
+          "tensor_load": {
+            "count_per_wave": 112.0,
+            "cycles_per_wave": 112.0,
+            "stall_cycles_per_wave": 0.0,
+            "cycles_per_instruction": 1.0
+          },
+          "wait_lds": {
+            "count_per_wave": 392.0,
+            "cycles_per_wave": 8208.535714285714,
+            "stall_cycles_per_wave": 7816.535714285715,
+            "cycles_per_instruction": 20.940142128279884
+          },
+          "wait_tensor": {
+            "count_per_wave": 114.0,
+            "cycles_per_wave": 50095.0,
+            "stall_cycles_per_wave": 49981.0,
+            "cycles_per_instruction": 439.4298245614035
+          },
+          "wmma": {
+            "count_per_wave": 896.0,
+            "cycles_per_wave": 9033.57142857143,
+            "stall_cycles_per_wave": 969.5714285714286,
+            "cycles_per_instruction": 10.082110969387756
+          }
+        },
+        "median_epilogue_span_cycles": 2745.0,
+        "mean_epilogue_store_wait_cycles": 106.96428571428571,
+        "per_dispatch": {
+          "ui_output_agent_13891_dispatch_1": {
+            "active_waves": 11,
+            "median_main_span_cycles": 78449,
+            "mean_epilogue_store_wait_cycles": 106.36363636363636
+          },
+          "ui_output_agent_13891_dispatch_2": {
+            "active_waves": 8,
+            "median_main_span_cycles": 89297.0,
+            "mean_epilogue_store_wait_cycles": 116.125
+          },
+          "ui_output_agent_13891_dispatch_3": {
+            "active_waves": 9,
+            "median_main_span_cycles": 80602,
+            "mean_epilogue_store_wait_cycles": 99.55555555555556
+          }
+        }
+      }
+    }
+  },
+  "counters": {
+    "activity": {
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K3072_e96_s16f00g0": {
+        "dispatches": 8,
+        "median_duration_us": 87.6455,
+        "counter_medians": {
+          "SQ_BUSY_CYCLES": 42131889.5,
+          "SQ_INSTS_SALU": 0.0,
+          "SQ_INSTS_VALU": 0.0,
+          "SQ_INST_LEVEL_LDS": 0.0
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K3072_e96_s16f22g0": {
+        "dispatches": 8,
+        "median_duration_us": 87.386,
+        "counter_medians": {
+          "SQ_BUSY_CYCLES": 41637868.0,
+          "SQ_INSTS_SALU": 0.0,
+          "SQ_INSTS_VALU": 0.0,
+          "SQ_INST_LEVEL_LDS": 0.0
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K3072_e96_s16f22g1": {
+        "dispatches": 8,
+        "median_duration_us": 88.7775,
+        "counter_medians": {
+          "SQ_BUSY_CYCLES": 42618496.0,
+          "SQ_INSTS_SALU": 0.0,
+          "SQ_INSTS_VALU": 0.0,
+          "SQ_INST_LEVEL_LDS": 0.0
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K3072_e96_s32f00g0": {
+        "dispatches": 8,
+        "median_duration_us": 79.5945,
+        "counter_medians": {
+          "SQ_BUSY_CYCLES": 41398901.0,
+          "SQ_INSTS_SALU": 0.0,
+          "SQ_INSTS_VALU": 0.0,
+          "SQ_INST_LEVEL_LDS": 0.0
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s16f00g0": {
+        "dispatches": 8,
+        "median_duration_us": 165.5275,
+        "counter_medians": {
+          "SQ_BUSY_CYCLES": 73895897.0,
+          "SQ_INSTS_SALU": 0.0,
+          "SQ_INSTS_VALU": 0.0,
+          "SQ_INST_LEVEL_LDS": 0.0
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s16f22g0": {
+        "dispatches": 8,
+        "median_duration_us": 166.609,
+        "counter_medians": {
+          "SQ_BUSY_CYCLES": 72989006.0,
+          "SQ_INSTS_SALU": 0.0,
+          "SQ_INSTS_VALU": 0.0,
+          "SQ_INST_LEVEL_LDS": 0.0
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s16f22g1": {
+        "dispatches": 8,
+        "median_duration_us": 165.167,
+        "counter_medians": {
+          "SQ_BUSY_CYCLES": 73068800.0,
+          "SQ_INSTS_SALU": 0.0,
+          "SQ_INSTS_VALU": 0.0,
+          "SQ_INST_LEVEL_LDS": 0.0
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s32f00g0": {
+        "dispatches": 8,
+        "median_duration_us": 158.6275,
+        "counter_medians": {
+          "SQ_BUSY_CYCLES": 70492212.5,
+          "SQ_INSTS_SALU": 0.0,
+          "SQ_INSTS_VALU": 0.0,
+          "SQ_INST_LEVEL_LDS": 0.0
+        }
+      }
+    },
+    "cache": {
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K3072_e96_s16f00g0": {
+        "dispatches": 8,
+        "median_duration_us": 90.2695,
+        "counter_medians": {
+          "GL2C_HIT": 498422.5,
+          "GL2C_MISS": 4645846.0,
+          "GL2C_READ_SECTORS": 42329545.5,
+          "GL2C_EA_RDREQ_DRAM": 35353609.5
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K3072_e96_s16f22g0": {
+        "dispatches": 8,
+        "median_duration_us": 91.1565,
+        "counter_medians": {
+          "GL2C_HIT": 497936.0,
+          "GL2C_MISS": 4645924.5,
+          "GL2C_READ_SECTORS": 42322925.0,
+          "GL2C_EA_RDREQ_DRAM": 35352874.5
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K3072_e96_s16f22g1": {
+        "dispatches": 8,
+        "median_duration_us": 90.5505,
+        "counter_medians": {
+          "GL2C_HIT": 499702.0,
+          "GL2C_MISS": 4646090.5,
+          "GL2C_READ_SECTORS": 42421577.5,
+          "GL2C_EA_RDREQ_DRAM": 35352325.5
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K3072_e96_s32f00g0": {
+        "dispatches": 8,
+        "median_duration_us": 80.13,
+        "counter_medians": {
+          "GL2C_HIT": 757343.0,
+          "GL2C_MISS": 4396811.5,
+          "GL2C_READ_SECTORS": 40213950.5,
+          "GL2C_EA_RDREQ_DRAM": 33357291.0
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s16f00g0": {
+        "dispatches": 8,
+        "median_duration_us": 168.166,
+        "counter_medians": {
+          "GL2C_HIT": 1055462.5,
+          "GL2C_MISS": 8991996.5,
+          "GL2C_READ_SECTORS": 77969682.0,
+          "GL2C_EA_RDREQ_DRAM": 71720546.0
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s16f22g0": {
+        "dispatches": 8,
+        "median_duration_us": 169.834,
+        "counter_medians": {
+          "GL2C_HIT": 1044647.5,
+          "GL2C_MISS": 8991650.5,
+          "GL2C_READ_SECTORS": 77627346.0,
+          "GL2C_EA_RDREQ_DRAM": 71719084.5
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s16f22g1": {
+        "dispatches": 8,
+        "median_duration_us": 169.54399999999998,
+        "counter_medians": {
+          "GL2C_HIT": 1054128.5,
+          "GL2C_MISS": 8992114.0,
+          "GL2C_READ_SECTORS": 77715856.5,
+          "GL2C_EA_RDREQ_DRAM": 71721621.0
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s32f00g0": {
+        "dispatches": 8,
+        "median_duration_us": 161.722,
+        "counter_medians": {
+          "GL2C_HIT": 1550852.0,
+          "GL2C_MISS": 8491816.5,
+          "GL2C_READ_SECTORS": 73317323.5,
+          "GL2C_EA_RDREQ_DRAM": 67712176.5
+        }
+      }
+    },
+    "latency": {
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K3072_e96_s16f00g0": {
+        "dispatches": 8,
+        "median_duration_us": 89.654,
+        "counter_medians": {
+          "GL2C_EA_RDREQ": 4480892.0,
+          "GL2C_EA_RDREQ_LEVEL": 3907042628.5,
+          "GL2C_LATENCY_FIFO_FULL": 13497.5,
+          "GL2C_SRC_FIFO_FULL": 0.0
+        },
+        "mean_request_latency_cycles": 871.9341212642482
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K3072_e96_s16f22g0": {
+        "dispatches": 8,
+        "median_duration_us": 91.201,
+        "counter_medians": {
+          "GL2C_EA_RDREQ": 4480947.0,
+          "GL2C_EA_RDREQ_LEVEL": 3905021516.0,
+          "GL2C_LATENCY_FIFO_FULL": 11237.0,
+          "GL2C_SRC_FIFO_FULL": 0.0
+        },
+        "mean_request_latency_cycles": 871.4723731389815
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K3072_e96_s16f22g1": {
+        "dispatches": 8,
+        "median_duration_us": 90.50999999999999,
+        "counter_medians": {
+          "GL2C_EA_RDREQ": 4480750.0,
+          "GL2C_EA_RDREQ_LEVEL": 3812545820.0,
+          "GL2C_LATENCY_FIFO_FULL": 9724.0,
+          "GL2C_SRC_FIFO_FULL": 0.0
+        },
+        "mean_request_latency_cycles": 850.8722468336774
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K3072_e96_s32f00g0": {
+        "dispatches": 8,
+        "median_duration_us": 82.6285,
+        "counter_medians": {
+          "GL2C_EA_RDREQ": 4231324.5,
+          "GL2C_EA_RDREQ_LEVEL": 3537405672.0,
+          "GL2C_LATENCY_FIFO_FULL": 22834.0,
+          "GL2C_SRC_FIFO_FULL": 0.0
+        },
+        "mean_request_latency_cycles": 836.0043461568594
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s16f00g0": {
+        "dispatches": 8,
+        "median_duration_us": 170.88049999999998,
+        "counter_medians": {
+          "GL2C_EA_RDREQ": 8976245.5,
+          "GL2C_EA_RDREQ_LEVEL": 8128264700.5,
+          "GL2C_LATENCY_FIFO_FULL": 18313.5,
+          "GL2C_SRC_FIFO_FULL": 0.0
+        },
+        "mean_request_latency_cycles": 905.5305696017339
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s16f22g0": {
+        "dispatches": 8,
+        "median_duration_us": 169.3835,
+        "counter_medians": {
+          "GL2C_EA_RDREQ": 8976522.0,
+          "GL2C_EA_RDREQ_LEVEL": 8235827524.5,
+          "GL2C_LATENCY_FIFO_FULL": 16470.0,
+          "GL2C_SRC_FIFO_FULL": 0.0
+        },
+        "mean_request_latency_cycles": 917.4853606441336
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s16f22g1": {
+        "dispatches": 8,
+        "median_duration_us": 169.86450000000002,
+        "counter_medians": {
+          "GL2C_EA_RDREQ": 8976283.0,
+          "GL2C_EA_RDREQ_LEVEL": 7959780161.5,
+          "GL2C_LATENCY_FIFO_FULL": 19721.0,
+          "GL2C_SRC_FIFO_FULL": 0.0
+        },
+        "mean_request_latency_cycles": 886.7568192201605
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s32f00g0": {
+        "dispatches": 8,
+        "median_duration_us": 161.897,
+        "counter_medians": {
+          "GL2C_EA_RDREQ": 8473086.0,
+          "GL2C_EA_RDREQ_LEVEL": 7486277332.0,
+          "GL2C_LATENCY_FIFO_FULL": 39638.5,
+          "GL2C_SRC_FIFO_FULL": 0.0
+        },
+        "mean_request_latency_cycles": 883.5360967656884
+      }
+    },
+    "lds_wait": {
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K3072_e96_s16f00g0": {
+        "dispatches": 8,
+        "median_duration_us": 87.1455,
+        "counter_medians": {
+          "SQ_INSTS_LDS": 0.0,
+          "SQ_WAIT_ANY": 0.0,
+          "SQ_WAIT_INST_ANY": 0.0,
+          "SQ_INST_CYCLES_LDS": 0.0
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K3072_e96_s16f22g0": {
+        "dispatches": 8,
+        "median_duration_us": 86.5295,
+        "counter_medians": {
+          "SQ_INSTS_LDS": 0.0,
+          "SQ_WAIT_ANY": 0.0,
+          "SQ_WAIT_INST_ANY": 0.0,
+          "SQ_INST_CYCLES_LDS": 0.0
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K3072_e96_s16f22g1": {
+        "dispatches": 8,
+        "median_duration_us": 88.477,
+        "counter_medians": {
+          "SQ_INSTS_LDS": 0.0,
+          "SQ_WAIT_ANY": 0.0,
+          "SQ_WAIT_INST_ANY": 0.0,
+          "SQ_INST_CYCLES_LDS": 0.0
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K3072_e96_s32f00g0": {
+        "dispatches": 8,
+        "median_duration_us": 78.107,
+        "counter_medians": {
+          "SQ_INSTS_LDS": 0.0,
+          "SQ_WAIT_ANY": 0.0,
+          "SQ_WAIT_INST_ANY": 0.0,
+          "SQ_INST_CYCLES_LDS": 0.0
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s16f00g0": {
+        "dispatches": 8,
+        "median_duration_us": 163.625,
+        "counter_medians": {
+          "SQ_INSTS_LDS": 0.0,
+          "SQ_WAIT_ANY": 0.0,
+          "SQ_WAIT_INST_ANY": 0.0,
+          "SQ_INST_CYCLES_LDS": 0.0
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s16f22g0": {
+        "dispatches": 8,
+        "median_duration_us": 168.2315,
+        "counter_medians": {
+          "SQ_INSTS_LDS": 0.0,
+          "SQ_WAIT_ANY": 0.0,
+          "SQ_WAIT_INST_ANY": 0.0,
+          "SQ_INST_CYCLES_LDS": 0.0
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s16f22g1": {
+        "dispatches": 8,
+        "median_duration_us": 166.5085,
+        "counter_medians": {
+          "SQ_INSTS_LDS": 0.0,
+          "SQ_WAIT_ANY": 0.0,
+          "SQ_WAIT_INST_ANY": 0.0,
+          "SQ_INST_CYCLES_LDS": 0.0
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s32f00g0": {
+        "dispatches": 8,
+        "median_duration_us": 161.151,
+        "counter_medians": {
+          "SQ_INSTS_LDS": 0.0,
+          "SQ_WAIT_ANY": 0.0,
+          "SQ_WAIT_INST_ANY": 0.0,
+          "SQ_INST_CYCLES_LDS": 0.0
+        }
+      }
+    },
+    "memory_bytes": {
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K3072_e96_s16f00g0": {
+        "dispatches": 8,
+        "median_duration_us": 89.7195,
+        "counter_medians": {
+          "GL2C_EA_RDREQ_128B_sum": 0.0,
+          "GL2C_EA_RDREQ_256B_sum": 4481202.0,
+          "GL2C_EA_RDREQ_32B_sum": 38.5,
+          "GL2C_EA_RDREQ_64B_sum": 47.0
+        },
+        "read_request_bytes": 1147191952.0,
+        "read_request_TB_per_s": 12.786428279248101
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K3072_e96_s16f22g0": {
+        "dispatches": 8,
+        "median_duration_us": 90.5455,
+        "counter_medians": {
+          "GL2C_EA_RDREQ_128B_sum": 0.0,
+          "GL2C_EA_RDREQ_256B_sum": 4481249.0,
+          "GL2C_EA_RDREQ_32B_sum": 74.5,
+          "GL2C_EA_RDREQ_64B_sum": 47.0
+        },
+        "read_request_bytes": 1147205136.0,
+        "read_request_TB_per_s": 12.669929880557287
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K3072_e96_s16f22g1": {
+        "dispatches": 8,
+        "median_duration_us": 90.71100000000001,
+        "counter_medians": {
+          "GL2C_EA_RDREQ_128B_sum": 0.0,
+          "GL2C_EA_RDREQ_256B_sum": 4481101.5,
+          "GL2C_EA_RDREQ_32B_sum": 50.5,
+          "GL2C_EA_RDREQ_64B_sum": 47.5
+        },
+        "read_request_bytes": 1147166640.0,
+        "read_request_TB_per_s": 12.646389522770114
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K3072_e96_s32f00g0": {
+        "dispatches": 8,
+        "median_duration_us": 80.7305,
+        "counter_medians": {
+          "GL2C_EA_RDREQ_128B_sum": 0.0,
+          "GL2C_EA_RDREQ_256B_sum": 4231677.0,
+          "GL2C_EA_RDREQ_32B_sum": 42.0,
+          "GL2C_EA_RDREQ_64B_sum": 48.0
+        },
+        "read_request_bytes": 1083313728.0,
+        "read_request_TB_per_s": 13.418890357423773
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s16f00g0": {
+        "dispatches": 8,
+        "median_duration_us": 168.7525,
+        "counter_medians": {
+          "GL2C_EA_RDREQ_128B_sum": 4328.0,
+          "GL2C_EA_RDREQ_256B_sum": 8971841.0,
+          "GL2C_EA_RDREQ_32B_sum": 46.0,
+          "GL2C_EA_RDREQ_64B_sum": 49.0
+        },
+        "read_request_bytes": 2297349888.0,
+        "read_request_TB_per_s": 13.613723577428482
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s16f22g0": {
+        "dispatches": 8,
+        "median_duration_us": 169.0675,
+        "counter_medians": {
+          "GL2C_EA_RDREQ_128B_sum": 4448.0,
+          "GL2C_EA_RDREQ_256B_sum": 8971634.5,
+          "GL2C_EA_RDREQ_32B_sum": 46.0,
+          "GL2C_EA_RDREQ_64B_sum": 47.5
+        },
+        "read_request_bytes": 2297312288.0,
+        "read_request_TB_per_s": 13.588136619989058
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s16f22g1": {
+        "dispatches": 8,
+        "median_duration_us": 169.053,
+        "counter_medians": {
+          "GL2C_EA_RDREQ_128B_sum": 4464.0,
+          "GL2C_EA_RDREQ_256B_sum": 8971827.5,
+          "GL2C_EA_RDREQ_32B_sum": 46.0,
+          "GL2C_EA_RDREQ_64B_sum": 47.0
+        },
+        "read_request_bytes": 2297363712.0,
+        "read_request_TB_per_s": 13.589606289151924
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s32f00g0": {
+        "dispatches": 8,
+        "median_duration_us": 161.9525,
+        "counter_medians": {
+          "GL2C_EA_RDREQ_128B_sum": 2209.0,
+          "GL2C_EA_RDREQ_256B_sum": 8471719.5,
+          "GL2C_EA_RDREQ_32B_sum": 56.0,
+          "GL2C_EA_RDREQ_64B_sum": 47.0
+        },
+        "read_request_bytes": 2169047744.0,
+        "read_request_TB_per_s": 13.39311059724302
+      }
+    },
+    "wmma": {
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K3072_e96_s16f00g0": {
+        "dispatches": 8,
+        "median_duration_us": 86.785,
+        "counter_medians": {
+          "SQ_WAVES": 8064.0,
+          "SQ_WAVE_CYCLES": 0.0,
+          "SQ_INST_CYCLES_VALU_WMMA": 0.0,
+          "SQ_INSTS_VEC32_VALU_WMMA": 0.0
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K3072_e96_s16f22g0": {
+        "dispatches": 8,
+        "median_duration_us": 88.327,
+        "counter_medians": {
+          "SQ_WAVES": 8064.0,
+          "SQ_WAVE_CYCLES": 0.0,
+          "SQ_INST_CYCLES_VALU_WMMA": 0.0,
+          "SQ_INSTS_VEC32_VALU_WMMA": 0.0
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K3072_e96_s16f22g1": {
+        "dispatches": 8,
+        "median_duration_us": 88.07249999999999,
+        "counter_medians": {
+          "SQ_WAVES": 8064.0,
+          "SQ_WAVE_CYCLES": 0.0,
+          "SQ_INST_CYCLES_VALU_WMMA": 0.0,
+          "SQ_INSTS_VEC32_VALU_WMMA": 0.0
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K3072_e96_s32f00g0": {
+        "dispatches": 8,
+        "median_duration_us": 76.7795,
+        "counter_medians": {
+          "SQ_WAVES": 8064.0,
+          "SQ_WAVE_CYCLES": 0.0,
+          "SQ_INST_CYCLES_VALU_WMMA": 0.0,
+          "SQ_INSTS_VEC32_VALU_WMMA": 0.0
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s16f00g0": {
+        "dispatches": 8,
+        "median_duration_us": 165.297,
+        "counter_medians": {
+          "SQ_WAVES": 6912.0,
+          "SQ_WAVE_CYCLES": 0.0,
+          "SQ_INST_CYCLES_VALU_WMMA": 0.0,
+          "SQ_INSTS_VEC32_VALU_WMMA": 0.0
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s16f22g0": {
+        "dispatches": 8,
+        "median_duration_us": 164.9665,
+        "counter_medians": {
+          "SQ_WAVES": 6912.0,
+          "SQ_WAVE_CYCLES": 0.0,
+          "SQ_INST_CYCLES_VALU_WMMA": 0.0,
+          "SQ_INSTS_VEC32_VALU_WMMA": 0.0
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s16f22g1": {
+        "dispatches": 8,
+        "median_duration_us": 167.2055,
+        "counter_medians": {
+          "SQ_WAVES": 6912.0,
+          "SQ_WAVE_CYCLES": 0.0,
+          "SQ_INST_CYCLES_VALU_WMMA": 0.0,
+          "SQ_INSTS_VEC32_VALU_WMMA": 0.0
+        }
+      },
+      "a8w4_tdm_fp4_t64x512x128_w1x4_b2_K7168_e96_act1_q1r4_s32f00g0": {
+        "dispatches": 8,
+        "median_duration_us": 157.345,
+        "counter_medians": {
+          "SQ_WAVES": 6912.0,
+          "SQ_WAVE_CYCLES": 0.0,
+          "SQ_INST_CYCLES_VALU_WMMA": 0.0,
+          "SQ_INSTS_VEC32_VALU_WMMA": 0.0
+        }
+      }
+    }
+  },
+  "format_ablation_512": {
+    "e8m0": {
+      "graph_median_us": [
+        155.39993345737457,
+        82.28306472301483
+      ],
+      "samples_us": [
+        [
+          155.39993345737457,
+          154.46224808692932,
+          155.0268679857254,
+          155.65530955791473,
+          155.62587976455688
+        ],
+        [
+          82.46581256389618,
+          83.21443945169449,
+          81.3065618276596,
+          80.46787232160568,
+          82.28306472301483
+        ]
+      ],
+      "logits_diff": 4.536594560460897e-12
+    },
+    "e4m3": {
+      "graph_median_us": [
+        156.4365029335022,
+        82.09281414747238
+      ],
+      "samples_us": [
+        [
+          156.140998005867,
+          156.4365029335022,
+          156.46900236606598,
+          157.78100490570068,
+          156.42642974853516
+        ],
+        [
+          82.09281414747238,
+          80.37018775939941,
+          82.66112208366394,
+          80.79331368207932,
+          82.22543448209763
+        ]
+      ],
+      "logits_diff": 1.6559558685510254e-05
+    },
+    "e4m3_float": {
+      "graph_median_us": [
+        157.37786889076233,
+        81.70969039201736
+      ],
+      "samples_us": [
+        [
+          157.37786889076233,
+          156.47150576114655,
+          156.84206783771515,
+          158.33425521850586,
+          158.7975025177002
+        ],
+        [
+          83.03669095039368,
+          81.70969039201736,
+          81.34669065475464,
+          81.92499727010727,
+          81.05118572711945
+        ]
+      ],
+      "logits_diff": 1.7931270513543052e-05
+    },
+    "e4m3_a": {
+      "graph_median_us": [
+        157.31531381607056,
+        81.4318135380745
+      ],
+      "samples_us": [
+        [
+          155.04930913448334,
+          158.11893343925476,
+          156.98730945587158,
+          158.0539345741272,
+          157.31531381607056
+        ],
+        [
+          81.64212107658386,
+          81.31912350654602,
+          81.26655966043472,
+          81.4318135380745,
+          81.72974735498428
+        ]
+      ],
+      "logits_diff": 1.5882268380231448e-05
+    },
+    "e4m3_b": {
+      "graph_median_us": [
+        156.17606043815613,
+        81.68968558311462
+      ],
+      "samples_us": [
+        [
+          157.10249543190002,
+          154.88162636756897,
+          157.2050005197525,
+          156.17606043815613,
+          155.592679977417
+        ],
+        [
+          82.90399610996246,
+          81.68968558311462,
+          81.51693642139435,
+          81.5495029091835,
+          81.80231600999832
+        ]
+      ],
+      "logits_diff": 4.03221474282813e-12
+    }
+  },
+  "tdm_order_512": {
+    "baseline_scale32": {
+      "graph_median_us": [
+        148.48706126213074,
+        78.39474827051163
+      ],
+      "samples_us": [
+        [
+          148.2541859149933,
+          147.6677507162094,
+          150.97330510616302,
+          148.2216864824295,
+          149.55368638038635,
+          147.76350557804108,
+          148.48706126213074,
+          150.74799954891205,
+          149.64693784713745
+        ],
+        [
+          79.52893525362015,
+          78.21699976921082,
+          78.41475307941437,
+          79.69668507575989,
+          77.38575339317322,
+          78.15437763929367,
+          78.39474827051163,
+          79.15837317705154,
+          78.37969064712524
+        ]
+      ],
+      "logits_diff": 3.403618562975784e-06
+    },
+    "baseline_scale16": {
+      "graph_median_us": [
+        155.73537349700928,
+        81.76980912685394
+      ],
+      "samples_us": [
+        [
+          157.31781721115112,
+          155.14206886291504,
+          155.47756850719452,
+          156.33881092071533,
+          155.73537349700928,
+          157.2251319885254,
+          155.51263093948364,
+          156.4815640449524,
+          155.64024448394775
+        ],
+        [
+          80.16237616539001,
+          83.38718861341476,
+          80.56800067424774,
+          82.68618583679199,
+          81.76980912685394,
+          83.36462825536728,
+          81.84243738651276,
+          80.68569004535675,
+          81.66462182998657
+        ]
+      ],
+      "logits_diff": 4.536594560460897e-12
+    },
+    "baseline_nvfp4": {
+      "graph_median_us": [
+        157.19512104988098,
+        82.30062574148178
+      ],
+      "samples_us": [
+        [
+          156.40144050121307,
+          156.56912326812744,
+          155.29224276542664,
+          157.79094398021698,
+          157.61825442314148,
+          156.87713027000427,
+          157.19512104988098,
+          158.3818793296814,
+          159.30575132369995
+        ],
+        [
+          81.06625080108643,
+          81.84487372636795,
+          82.30062574148178,
+          83.70769023895264,
+          82.39074796438217,
+          82.47087150812149,
+          83.86543393135071,
+          82.02768862247467,
+          81.0236856341362
+        ]
+      ],
+      "logits_diff": 1.7931270513543052e-05
+    },
+    "scales_first_scale16": {
+      "graph_median_us": [
+        156.36888146400452,
+        80.83087205886841
+      ],
+      "samples_us": [
+        [
+          156.1710685491562,
+          156.36888146400452,
+          157.1875661611557,
+          153.95274758338928,
+          157.23761916160583,
+          157.0373773574829,
+          155.592679977417,
+          155.15705943107605,
+          156.68430924415588
+        ],
+        [
+          81.22900128364563,
+          80.83087205886841,
+          80.6756243109703,
+          81.62456005811691,
+          80.62306046485901,
+          80.1849365234375,
+          80.0371840596199,
+          81.68718963861465,
+          81.23649656772614
+        ]
+      ],
+      "logits_diff": 4.536594560460897e-12
+    },
+    "scales_first_nvfp4": {
+      "graph_median_us": [
+        157.7959954738617,
+        81.8624347448349
+      ],
+      "samples_us": [
+        [
+          157.8085571527481,
+          157.7959954738617,
+          158.73487293720245,
+          156.41887485980988,
+          155.6353121995926,
+          157.85355865955353,
+          155.9031903743744,
+          157.6157510280609,
+          158.52206945419312
+        ],
+        [
+          80.97612112760544,
+          82.82137662172318,
+          82.11031556129456,
+          82.05268532037735,
+          82.6636254787445,
+          81.13381266593933,
+          81.46937191486359,
+          81.60705864429474,
+          81.8624347448349
+        ]
+      ],
+      "logits_diff": 1.7931270513543052e-05
+    }
+  },
+  "tdm_order_16384": {
+    "baseline_scale32": {
+      "graph_median_us": [
+        1476.4857292175293,
+        805.9503436088562
+      ],
+      "samples_us": [
+        [
+          1466.0927057266235,
+          1472.4147319793701,
+          1476.4331579208374,
+          1476.678490638733,
+          1474.89333152771,
+          1476.6035079956055,
+          1477.2944450378418,
+          1477.1116971969604,
+          1476.4857292175293
+        ],
+        [
+          801.4687299728394,
+          804.8737645149231,
+          804.0775656700134,
+          807.7030181884766,
+          807.1771860122681,
+          805.7826161384583,
+          805.9503436088562,
+          806.0956001281738,
+          806.526243686676
+        ]
+      ],
+      "logits_diff": 3.3979915419884413e-06
+    },
+    "baseline_scale16": {
+      "graph_median_us": [
+        1605.568766593933,
+        841.8190479278564
+      ],
+      "samples_us": [
+        [
+          1596.9257354736328,
+          1603.6909818649292,
+          1605.1231622695923,
+          1605.3860187530518,
+          1605.568766593933,
+          1606.8006753921509,
+          1606.5903902053833,
+          1608.728528022766,
+          1606.1947345733643
+        ],
+        [
+          838.9822840690613,
+          840.8776521682739,
+          841.2531614303589,
+          841.3308262825012,
+          842.8555727005005,
+          842.3723578453064,
+          842.3473238945007,
+          841.8190479278564,
+          842.858076095581
+        ]
+      ],
+      "logits_diff": 1.3277538734797678e-11
+    },
+    "baseline_nvfp4": {
+      "graph_median_us": [
+        1637.1560096740723,
+        850.4970073699951
+      ],
+      "samples_us": [
+        [
+          1630.0954818725586,
+          1631.5126419067383,
+          1636.61527633667,
+          1637.1560096740723,
+          1633.6032152175903,
+          1637.4415159225464,
+          1639.4870281219482,
+          1637.4365091323853,
+          1639.569640159607
+        ],
+        [
+          846.9642400741577,
+          848.7894535064697,
+          849.4329452514648,
+          851.2881994247437,
+          850.8801460266113,
+          849.9086499214172,
+          850.6748080253601,
+          850.5996465682983,
+          850.4970073699951
+        ]
+      ],
+      "logits_diff": 1.7729418887658134e-05
+    },
+    "scales_first_scale16": {
+      "graph_median_us": [
+        1606.7055463790894,
+        841.4384722709656
+      ],
+      "samples_us": [
+        [
+          1602.8447151184082,
+          1604.8502922058105,
+          1605.9969663619995,
+          1607.469081878662,
+          1606.0595512390137,
+          1607.822299003601,
+          1606.7055463790894,
+          1610.2783679962158,
+          1608.0174446105957
+        ],
+        [
+          841.1730527877808,
+          841.4510488510132,
+          840.3393030166626,
+          841.5135741233826,
+          841.4384722709656,
+          840.930163860321,
+          842.6452279090881,
+          841.8040871620178,
+          841.1455750465393
+        ]
+      ],
+      "logits_diff": 1.3277538734797678e-11
+    },
+    "scales_first_nvfp4": {
+      "graph_median_us": [
+        1637.2936964035034,
+        850.3643274307251
+      ],
+      "samples_us": [
+        [
+          1633.4680318832397,
+          1636.144518852234,
+          1637.2936964035034,
+          1637.9122734069824,
+          1640.3758525848389,
+          1636.9032859802246,
+          1638.993740081787,
+          1637.1058225631714,
+          1638.946294784546
+        ],
+        [
+          849.0048050880432,
+          851.5636324882507,
+          849.6407270431519,
+          850.153923034668,
+          851.0603308677673,
+          851.8415093421936,
+          849.0047454833984,
+          850.3643274307251,
+          852.2871732711792
+        ]
+      ],
+      "logits_diff": 1.7729418887658134e-05
+    }
+  },
+  "packed_stores_512": {
+    "baseline_scale32": {
+      "graph_median_us": [
+        148.77505600452423,
+        78.31462472677231
+      ],
+      "samples_us": [
+        [
+          148.10656011104584,
+          149.90675449371338,
+          148.48706126213074,
+          149.72643554210663,
+          147.9218751192093,
+          148.77505600452423,
+          150.21462738513947
+        ],
+        [
+          77.88900285959244,
+          77.47087627649307,
+          79.31112498044968,
+          78.85293662548065,
+          78.31462472677231,
+          78.1894400715828,
+          79.15087789297104
+        ]
+      ],
+      "logits_diff": 3.403618562975784e-06
+    },
+    "baseline_scale16": {
+      "graph_median_us": [
+        155.3248167037964,
+        81.62962645292282
+      ],
+      "samples_us": [
+        [
+          155.3248167037964,
+          155.07693588733673,
+          154.671311378479,
+          156.2511920928955,
+          155.63280880451202,
+          155.09194135665894,
+          155.8781862258911
+        ],
+        [
+          80.24755865335464,
+          81.37668669223785,
+          82.05024898052216,
+          81.57449960708618,
+          82.04768598079681,
+          81.62962645292282,
+          81.62962645292282
+        ]
+      ],
+      "logits_diff": 4.536594560460897e-12
+    },
+    "baseline_nvfp4": {
+      "graph_median_us": [
+        158.57969224452972,
+        82.96162635087967
+      ],
+      "samples_us": [
+        [
+          156.12225234508514,
+          159.1755598783493,
+          158.57969224452972,
+          158.68480503559113,
+          157.43543207645416,
+          157.70088136196136,
+          159.17806327342987
+        ],
+        [
+          82.19543844461441,
+          83.26955884695053,
+          81.99012279510498,
+          84.26105976104736,
+          82.40575343370438,
+          82.96162635087967,
+          84.63912457227707
+        ]
+      ],
+      "logits_diff": 1.7931270513543052e-05
+    },
+    "packed_scale32": {
+      "graph_median_us": [
+        148.30181002616882,
+        79.48137819766998
+      ],
+      "samples_us": [
+        [
+          147.47805893421173,
+          148.73243868350983,
+          150.12206137180328,
+          148.2110619544983,
+          149.06543493270874,
+          146.90788090229034,
+          148.30181002616882
+        ],
+        [
+          79.69418913125992,
+          78.75531166791916,
+          78.03674787282944,
+          79.49143648147583,
+          79.62406426668167,
+          78.64012569189072,
+          79.48137819766998
+        ]
+      ],
+      "logits_diff": 3.403618562975784e-06
+    },
+    "packed_scale16": {
+      "graph_median_us": [
+        156.51662647724152,
+        81.40424638986588
+      ],
+      "samples_us": [
+        [
+          155.06693720817566,
+          156.51662647724152,
+          156.53662383556366,
+          157.2626829147339,
+          156.06588125228882,
+          154.03787791728973,
+          157.19255805015564
+        ],
+        [
+          81.52693510055542,
+          81.19643479585648,
+          81.37419074773788,
+          81.40424638986588,
+          84.14837718009949,
+          79.69168573617935,
+          83.36968719959259
+        ]
+      ],
+      "logits_diff": 4.536594560460897e-12
+    },
+    "packed_nvfp4": {
+      "graph_median_us": [
+        157.63574838638306,
+        81.87244087457657
+      ],
+      "samples_us": [
+        [
+          155.83306550979614,
+          156.04087710380554,
+          155.8731198310852,
+          159.22819077968597,
+          157.63574838638306,
+          157.78349339962006,
+          159.34588015079498
+        ],
+        [
+          81.66962116956711,
+          81.73218369483948,
+          82.19543844461441,
+          81.87244087457657,
+          81.49943500757217,
+          84.17587727308273,
+          81.96005970239639
+        ]
+      ],
+      "logits_diff": 1.7931270513543052e-05
+    }
+  },
+  "packed_stores_16384": {
+    "baseline_scale32": {
+      "graph_median_us": [
+        1474.8207330703735,
+        805.0140142440796
+      ],
+      "samples_us": [
+        [
+          1462.9855155944824,
+          1472.807765007019,
+          1474.3902683258057,
+          1474.8207330703735,
+          1476.4207601547241,
+          1477.882981300354,
+          1475.9750366210938
+        ],
+        [
+          798.8623976707458,
+          802.0395636558533,
+          805.472195148468,
+          805.8978319168091,
+          805.0140142440796,
+          805.206835269928,
+          803.66450548172
+        ]
+      ],
+      "logits_diff": 3.3979915419884413e-06
+    },
+    "baseline_scale16": {
+      "graph_median_us": [
+        1605.5688858032227,
+        840.2091860771179
+      ],
+      "samples_us": [
+        [
+          1596.7507362365723,
+          1604.8903465270996,
+          1605.5688858032227,
+          1607.877254486084,
+          1605.603814125061,
+          1604.4070720672607,
+          1607.1462631225586
+        ],
+        [
+          836.8391394615173,
+          838.5466933250427,
+          839.0999436378479,
+          840.2091860771179,
+          841.0053849220276,
+          840.9903049468994,
+          840.5371308326721
+        ]
+      ],
+      "logits_diff": 1.3277538734797678e-11
+    },
+    "baseline_nvfp4": {
+      "graph_median_us": [
+        1636.6102695465088,
+        850.399374961853
+      ],
+      "samples_us": [
+        [
+          1631.9032907485962,
+          1634.847640991211,
+          1637.105941772461,
+          1636.3798379898071,
+          1636.640191078186,
+          1636.6102695465088,
+          1638.1324529647827
+        ],
+        [
+          848.0709195137024,
+          850.9676456451416,
+          850.6848216056824,
+          849.3903875350952,
+          851.0903716087341,
+          850.399374961853,
+          850.3493070602417
+        ]
+      ],
+      "logits_diff": 1.7729418887658134e-05
+    },
+    "packed_scale32": {
+      "graph_median_us": [
+        1474.3075370788574,
+        804.2929172515869
+      ],
+      "samples_us": [
+        [
+          1471.3257551193237,
+          1473.1508493423462,
+          1475.158929824829,
+          1473.4036922454834,
+          1475.1112461090088,
+          1474.5705127716064,
+          1474.3075370788574
+        ],
+        [
+          803.3064603805542,
+          805.23681640625,
+          804.2929172515869,
+          805.144190788269,
+          803.9073348045349,
+          804.0450811386108,
+          804.7686219215393
+        ]
+      ],
+      "logits_diff": 3.3979915419884413e-06
+    },
+    "packed_scale16": {
+      "graph_median_us": [
+        1603.643536567688,
+        840.5472040176392
+      ],
+      "samples_us": [
+        [
+          1598.8162755966187,
+          1598.2329845428467,
+          1605.376124382019,
+          1603.643536567688,
+          1602.0009517669678,
+          1604.2970418930054,
+          1606.595516204834
+        ],
+        [
+          838.0107879638672,
+          840.186595916748,
+          840.1140570640564,
+          840.5472040176392,
+          842.2021865844727,
+          841.6763544082642,
+          841.521143913269
+        ]
+      ],
+      "logits_diff": 1.3277538734797678e-11
+    },
+    "packed_nvfp4": {
+      "graph_median_us": [
+        1632.3288679122925,
+        851.4109253883362
+      ],
+      "samples_us": [
+        [
+          1629.8826932907104,
+          1632.6192617416382,
+          1631.7980289459229,
+          1632.3288679122925,
+          1631.4375400543213,
+          1635.0054740905762,
+          1633.665919303894
+        ],
+        [
+          850.2642512321472,
+          851.3332605361938,
+          851.6663312911987,
+          848.9071726799011,
+          851.5611290931702,
+          851.6888618469238,
+          851.4109253883362
+        ]
+      ],
+      "logits_diff": 1.7729418887658134e-05
+    }
+  }
+}

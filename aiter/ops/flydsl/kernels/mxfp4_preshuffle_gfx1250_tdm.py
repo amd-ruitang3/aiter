@@ -1258,9 +1258,40 @@ def launch_gemm_a8w4_tdm(
                                             Vec.from_elements([packed_i32], fx.Int32),
                                         )
 
-                        # Preshuffled e8m0 scale: one branch per wm (not per mx_blk).
+                        # Adjacent block scales are contiguous in the preshuffle.
+                        # Pack within one scale group to avoid separate byte-store
+                        # requests and their exposed storecnt wait at kernel exit.
+                        SCALE_STORE_BYTES = (
+                            4 if N_MX_BLKS % 4 == 0 else 2 if N_MX_BLKS % 2 == 0 else 1
+                        )
+                        SCALE_STORE_CLS = (
+                            fx.Int32
+                            if SCALE_STORE_BYTES == 4
+                            else fx.Int16 if SCALE_STORE_BYTES == 2 else fx.Int8
+                        )
+                        packed_scale_ptr = fx.recast_iter(
+                            fx.PointerType.get(
+                                elem_ty=SCALE_STORE_CLS.ir_type,
+                                address_space=fx.AddressSpace.Global,
+                                alignment=SCALE_STORE_BYTES,
+                            ),
+                            scale_ptr,
+                        )
                         if row_rel < mn_oob and is_kgrp0:
-                            for mx_blk in range_constexpr(N_MX_BLKS):
+                            for packed_group in range_constexpr(
+                                N_MX_BLKS // SCALE_STORE_BYTES
+                            ):
+                                mx_blk = packed_group * SCALE_STORE_BYTES
+                                packed_scale = fx.Int32(0)
+                                for byte_idx in range_constexpr(SCALE_STORE_BYTES):
+                                    packed_scale = packed_scale | (
+                                        fx.Int32(
+                                            arith.extui(
+                                                T.i32, e8m0_bytes[mx_blk + byte_idx]
+                                            )
+                                        )
+                                        << (8 * byte_idx)
+                                    )
                                 scale_group = mx_blk_is[mx_blk] // SCALE_BYTES
                                 byte_in_group = mx_blk_is[mx_blk] % SCALE_BYTES
                                 dst_byte = (
@@ -1272,7 +1303,10 @@ def launch_gemm_a8w4_tdm(
                                     * 16
                                     + scale_lane
                                 ) * SCALE_BYTES + byte_in_group
-                                fx.ptr_store(e8m0_bytes[mx_blk], scale_ptr + dst_byte)
+                                fx.ptr_store(
+                                    SCALE_STORE_CLS(packed_scale),
+                                    packed_scale_ptr + dst_byte // SCALE_STORE_BYTES,
+                                )
             else:
                 # bf16/f16 activation (or passthrough) -> stage to LDS.
                 if const_expr(has_bias):

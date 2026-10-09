@@ -7,9 +7,10 @@ intermediate dimension 3072, balanced routing, SiLU, and no bias. Measurements
 are from 2026-10-09 on gfx1250 with 256 CUs. Experiments below use 16,384
 tokens and five interleaved graph timing rounds unless specified otherwise.
 
-The retained change corrects the FP4 scheduler's weight-read count from two
-to four b128 reads per fragment. It improves absolute performance slightly,
-but does not establish scale16/scale32 parity. Final production results and
+The retained changes correct the FP4 scheduler's weight-read count from two
+to four b128 reads per fragment and pack contiguous epilogue scale bytes into
+wider stores. They improve absolute performance slightly,
+but do not establish scale16/scale32 parity. Final production results and
 the commands for 512, 2048, and 16384 tokens are in
 [the scaling report](grouped_gemm_fp4_scaling.md).
 
@@ -21,15 +22,15 @@ gather/reduce are outside the isolated GEMM measurements. Consequently,
 changing the activation scale format affects both the main loop and GEMM1's
 output quantizer. Changing the weight scale format affects the main loop.
 
-The final graph medians after the scheduler correction are:
+The final graph medians after the scheduler and output-store changes are:
 
 | Tokens | Scale32 sum (µs) | Scale16 sum (µs) | NVFP4 + float sum (µs) | Scale16 overhead | NVFP4 overhead |
 |---:|---:|---:|---:|---:|---:|
-| 512 | 228.51 | 238.69 | 242.47 | 4.45% | 6.11% |
-| 2048 | 397.57 | 422.18 | 428.79 | 6.19% | 7.85% |
-| 16384 | 2275.32 | 2442.34 | 2478.60 | 7.34% | 8.93% |
+| 512 | 229.79 | 238.55 | 241.49 | 3.81% | 5.09% |
+| 2048 | 397.02 | 422.07 | 428.94 | 6.31% | 8.04% |
+| 16384 | 2274.43 | 2437.23 | 2478.00 | 7.16% | 8.95% |
 
-At 16k, profiler timing gives 7.28% and 9.06% overhead, respectively. The
+The final profiler and graph timings are both recorded in the scaling report. The
 small-token profiler results are closer, but do not imply equality at larger
 token counts. These sums are the two GEMM medians, not end-to-end MoE latency.
 
@@ -38,7 +39,10 @@ token counts. These sums are the two GEMM medians, not end-to-end MoE latency.
 One K128 row needs four encoded scale bytes for scale32 and eight for scale16.
 For a 64 × 512 × 128 tile, activation and weight payloads total 36,864 bytes.
 Scale data grows from 2304 to 4608 bytes: total input bytes grow by 5.88%.
-This is a byte accounting result, not a measured bandwidth attribution.
+This byte accounting is independently consistent with the 512-token memory
+counters: L2-to-memory read requests increase by about 5.9%. That agreement
+does not assign the entire latency gap to bytes; the decoded trace identifies
+where completion and synchronization expose transfer latency.
 
 The generated main loop keeps the same b128 payload loads and WMMA count.
 Scale32 uses `ds_load_2addr_b32`; scale16 uses `ds_load_2addr_b64`. Each
@@ -161,8 +165,14 @@ Padding does not reduce latency in this probe. An attempted TDM scale-padding
 layout failed correctness and was discarded without using its timing. The
 microbenchmark does not reproduce two-address loads or contention with
 payload LDS traffic, so it cannot rule out all bank effects in the full GEMM.
-Hardware counter collection failed with `aqlprofile API table load failed`;
-no bank-conflict counter values were obtained.
+The initial counter attempt failed because the installed AQL library lacked
+an unversioned loader name. A temporary symlink fixes collection. Memory and
+request-latency counters now work; SQ instruction/wait counters return zero
+even for known WMMA/LDS work and are unusable. No bank-conflict event is
+exposed for gfx1250. Decoded ATT traces show similar LDS waits and WMMA
+durations, but reveal an exposed output-scale store wait. See
+[the trace investigation](grouped_gemm_fp4_trace.md) for measured counters,
+assembly, the retained store fix, and reproduction commands.
 
 ## Evidence and remaining limits
 

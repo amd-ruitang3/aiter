@@ -14,16 +14,17 @@ do not select different tiles.
 The first tables cover 512 tokens; larger token counts follow below.
 
 Median of five interleaved rounds after correcting the FP4 weight-read
-scheduler count. This correction changes no tile or launch setting.
+scheduler count and packing adjacent output scales into wider stores. These
+changes leave the tile and launch settings unchanged.
 Each profiler measurement uses the same
 `run_perftest(..., num_warmup=5, num_iters=101, testGraph=False)` as the
 requested `--scenario kernel` command.
 
 | Mode | GEMM1 (µs) | GEMM2 (µs) | Sum (µs) | Sum vs scale32 |
 |---|---:|---:|---:|---:|
-| Scale32, E8M0 | 156.15 | 93.01 | 249.16 | baseline |
-| Real scale16, E8M0 | 158.79 | 96.15 | 254.95 | +2.32% |
-| NVFP4, scale16 E4M3 with float scales | 158.13 | 96.29 | 254.43 | +2.11% |
+| Scale32, E8M0 | 156.07 | 92.07 | 248.14 | baseline |
+| Real scale16, E8M0 | 158.80 | 95.95 | 254.76 | +2.67% |
+| NVFP4, scale16 E4M3 with float scales | 160.49 | 96.23 | 256.72 | +3.46% |
 
 The sum is the two isolated GEMM medians. GEMM1 includes its fused
 SiLU and intermediate quantization epilogue in this no-bias configuration.
@@ -36,9 +37,9 @@ uses the median across five interleaved rounds.
 
 | Mode | GEMM1 (µs) | GEMM2 (µs) | Sum (µs) | Sum vs scale32 |
 |---|---:|---:|---:|---:|
-| Scale32, E8M0 | 149.61 | 78.90 | 228.51 | baseline |
-| Real scale16, E8M0 | 156.56 | 82.12 | 238.69 | +4.45% |
-| NVFP4, scale16 E4M3 with float scales | 158.58 | 83.90 | 242.47 | +6.11% |
+| Scale32, E8M0 | 150.04 | 79.75 | 229.79 | baseline |
+| Real scale16, E8M0 | 155.67 | 82.88 | 238.55 | +3.81% |
+| NVFP4, scale16 E4M3 with float scales | 158.13 | 83.36 | 241.49 | +5.09% |
 
 Profiler timings are close, but graph timing still shows overhead with the
 same tiles. These results do not establish exact equality. All samples and
@@ -60,26 +61,26 @@ Profiler timing:
 
 | Tokens | Mode | GEMM1 (µs) | GEMM2 (µs) | Sum (µs) | Sum vs scale32 |
 |---:|---|---:|---:|---:|---:|
-| 2048 | Scale32, E8M0 | 252.12 | 149.97 | 402.08 | baseline |
-| 2048 | Real scale16, E8M0 | 266.95 | 150.99 | 417.94 | +3.94% |
-| 2048 | NVFP4, scale16 E4M3 with float scales | 276.26 | 149.24 | 425.51 | +5.83% |
-| 16384 | Scale32, E8M0 | 1469.26 | 798.99 | 2268.25 | baseline |
-| 16384 | Real scale16, E8M0 | 1597.44 | 836.03 | 2433.47 | +7.28% |
-| 16384 | NVFP4, scale16 E4M3 with float scales | 1629.73 | 844.07 | 2473.80 | +9.06% |
+| 2048 | Scale32, E8M0 | 251.36 | 148.09 | 399.45 | baseline |
+| 2048 | Real scale16, E8M0 | 269.72 | 146.52 | 416.24 | +4.20% |
+| 2048 | NVFP4, scale16 E4M3 with float scales | 271.45 | 150.96 | 422.41 | +5.75% |
+| 16384 | Scale32, E8M0 | 1469.52 | 798.32 | 2267.84 | baseline |
+| 16384 | Real scale16, E8M0 | 1597.62 | 834.48 | 2432.11 | +7.24% |
+| 16384 | NVFP4, scale16 E4M3 with float scales | 1625.24 | 845.32 | 2470.55 | +8.94% |
 
 Graph/event timing:
 
 | Tokens | Mode | GEMM1 (µs) | GEMM2 (µs) | Sum (µs) | Sum vs scale32 |
 |---:|---|---:|---:|---:|---:|
-| 2048 | Scale32, E8M0 | 257.07 | 140.50 | 397.57 | baseline |
-| 2048 | Real scale16, E8M0 | 273.66 | 148.52 | 422.18 | +6.19% |
-| 2048 | NVFP4, scale16 E4M3 with float scales | 279.59 | 149.20 | 428.79 | +7.85% |
-| 16384 | Scale32, E8M0 | 1473.38 | 801.94 | 2275.32 | baseline |
-| 16384 | Real scale16, E8M0 | 1601.84 | 840.50 | 2442.34 | +7.34% |
-| 16384 | NVFP4, scale16 E4M3 with float scales | 1630.83 | 847.77 | 2478.60 | +8.93% |
+| 2048 | Scale32, E8M0 | 256.16 | 140.86 | 397.02 | baseline |
+| 2048 | Real scale16, E8M0 | 273.86 | 148.21 | 422.07 | +6.31% |
+| 2048 | NVFP4, scale16 E4M3 with float scales | 280.53 | 148.41 | 428.94 | +8.04% |
+| 16384 | Scale32, E8M0 | 1471.29 | 803.14 | 2274.43 | baseline |
+| 16384 | Real scale16, E8M0 | 1599.03 | 838.20 | 2437.23 | +7.16% |
+| 16384 | NVFP4, scale16 E4M3 with float scales | 1629.02 | 848.98 | 2478.00 | +8.95% |
 
 At 16,384 tokens, profiler and graph timing agree closely. Scale16 GEMM1
-has about 8.7% overhead and GEMM2 about 4.7%; NVFP4 has about 10.7% and
+has about 8.7% overhead and GEMM2 about 4.4%; NVFP4 has about 10.7% and
 5.7%, respectively. The 512-token profiler alignment does not persist at larger
 token counts with these fixed tiles.
 
@@ -93,8 +94,9 @@ Raw samples and launch settings:
 [16,384-token results](grouped_gemm_fp4_scaling_tokens16384_results.json).
 
 Deeper ablations, ISA resource checks, and scale preload/LDS experiments are
-in [the NVFP4 analysis](grouped_gemm_nvfp4_analysis.md). The scheduler correction
-improves absolute performance slightly; exact scale16/scale32 parity is not
+in [the NVFP4 analysis](grouped_gemm_nvfp4_analysis.md) and
+[the decoded trace/counter investigation](grouped_gemm_fp4_trace.md). Packing
+output scales removes a measured store wait; exact scale16/scale32 parity is not
 achieved with the fixed CSV tiles.
 
 ## Correctness and representation
