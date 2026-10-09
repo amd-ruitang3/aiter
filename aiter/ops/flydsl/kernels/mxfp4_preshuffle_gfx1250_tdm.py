@@ -1142,7 +1142,7 @@ def launch_gemm_a8w4_tdm(
                         wmma_row = row_in_tile >> 4
                         scale_lane = row_in_tile & 15
 
-                        e8m0_bytes = []
+                        scale_bytes = []
                         mx_blk_is = []
                         for mx_blk in range_constexpr(N_MX_BLKS):
                             # Gather (gate, up) pairs for this MX block.
@@ -1179,11 +1179,11 @@ def launch_gemm_a8w4_tdm(
                                         ).bitcast(fx.Float32),
                                     )
                                 amax = arith.maxnumf(amax, amax.shuffle_xor(16, WAVE))
-                                scale_f32, e8m0_byte = emit_fp4_block_scale(
+                                scale_f32, scale_byte = emit_fp4_block_scale(
                                     amax, scale_format_a, quant_global_scale
                                 )
                             else:
-                                scale_f32, e8m0_byte = emit_amax_e8m0_native_scale(
+                                scale_f32, scale_byte = emit_amax_e8m0_native_scale(
                                     all_vals,
                                     wave_size=WAVE,
                                     dtype=(
@@ -1194,7 +1194,7 @@ def launch_gemm_a8w4_tdm(
                                 )
                             mx_col = blk_n + wnb + mx_blk * WN_PER_MX_BLOCK * 16
                             mx_blk_i = fx.Int32(mx_col) // (scale_block_size * 2)
-                            e8m0_bytes.append(e8m0_byte)
+                            scale_bytes.append(scale_byte)
                             mx_blk_is.append(mx_blk_i)
 
                             if const_expr(is_fp4_quant):
@@ -1211,6 +1211,9 @@ def launch_gemm_a8w4_tdm(
                                     if const_expr(
                                         scale_format_a or quant_global_scale != 1.0
                                     ):
+                                        # WMMA consumes E4M3 scales natively.
+                                        # FP4 packing needs f32 normalization to
+                                        # preserve the rounded scale's mantissa.
                                         src = src * (
                                             fx.Float32(1.0)
                                             / (scale_f32 * quant_global_scale)
@@ -1287,7 +1290,7 @@ def launch_gemm_a8w4_tdm(
                                     packed_scale = packed_scale | (
                                         fx.Int32(
                                             arith.extui(
-                                                T.i32, e8m0_bytes[mx_blk + byte_idx]
+                                                T.i32, scale_bytes[mx_blk + byte_idx]
                                             )
                                         )
                                         << (8 * byte_idx)

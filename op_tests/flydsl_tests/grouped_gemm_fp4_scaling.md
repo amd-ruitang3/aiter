@@ -157,6 +157,11 @@ in [the NVFP4 analysis](grouped_gemm_nvfp4_analysis.md) and
 output scales removes a measured store wait; exact scale16/scale32 parity is not
 achieved with the fixed CSV tiles.
 
+The latest [assembly/access-pattern probes](grouped_gemm_fp4_access.md) retain
+native E4M3 encoding/decoding in the output quantizer, with unchanged CSV tiles.
+They reduce GEMM1's sampled epilogue and save about 0.35% at 16k tokens; the
+scale16 transport gap remains. That report contains updated 11-round timings.
+
 ## Correctness and representation
 
 Scale16 stores **eight independent scale bytes per K128 row** and loads them

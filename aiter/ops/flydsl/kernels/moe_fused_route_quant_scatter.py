@@ -387,6 +387,8 @@ def _emit_quant_block_loop(c: SimpleNamespace) -> None:
                     block_amax, c.scale_format, c.global_scale
                 )
                 e8m0_scale = arith.extui(i32, scale_byte)
+                # E4M3 is encoded/decoded by native FP8 conversions; normalize
+                # in f32 because the FP4 pack's scale operand uses an exponent.
                 # A zero scale byte must not produce an overflowing reciprocal
                 # when the E8M0 decoded scale is subnormal.
                 divisor = block_scale_f32 * c.global_scale

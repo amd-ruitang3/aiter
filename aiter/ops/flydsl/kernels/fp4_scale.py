@@ -31,6 +31,17 @@ def emit_fp4_block_scale(amax, scale_format=0, global_scale=1.0):
     bias = 15 if scale_format == 1 else 7
     max_value = 114688.0 if scale_format == 1 else 448.0
     value = fx.Float32(arith.minnumf(amax * (1.0 / (6.0 * global_scale)), max_value))
+    if scale_format == 2:
+        # gfx1250's FP8 conversions encode/decode positive E4M3 directly.
+        # Decode the rounded byte so FP4 normalization uses the stored scale.
+        packed = rocdl_ops.cvt_pk_fp8_f32(
+            T.i32, _to_raw(value), _to_raw(value), _to_raw(fx.Int32(0)), False
+        )
+        scale = fx.Float32(rocdl_ops.cvt_f32_fp8(T.f32, packed, 0))
+        byte = fx.Int32(packed) & 255
+        return (byte == 0).select(fx.Float32(1.0), scale), arith.trunci(
+            T.i8, _to_raw(byte)
+        )
     bits = value.bitcast(fx.Int32)
     normal = ((bits + 0x7FFFF + ((bits >> 20) & 1)) >> 20) - ((127 - bias) << 3)
     denorm = fx.Int32(arith.fptoui(T.i32, _to_raw(_rint(value * (2.0 ** (bias + 2))))))

@@ -14,6 +14,13 @@ but do not establish scale16/scale32 parity. Final production results and
 the commands for 512, 2048, and 16384 tokens are in
 [the scaling report](grouped_gemm_fp4_scaling.md).
 
+The subsequent [access-pattern investigation](grouped_gemm_fp4_access.md)
+tests scale batching, contiguous scale packing, early LDS reuse, and padded-row
+WMMA controls. It also replaces the software E4M3 quantizer scale encoder and
+decoder with native FP8 conversions. WMMA already consumes E4M3 bytes natively;
+the retained conversion change concerns newly generated output scales. The
+new report contains the latest timings and verified epilogue trace.
+
 ## What the timing includes
 
 GEMM1 includes fused SiLU and intermediate FP4 quantization when bias is absent.
